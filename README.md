@@ -210,8 +210,9 @@ data/raw/*.csv
 [2] lọc nhóm store (store_filter)
 [3] ⭐ ZERO-FILL: reindex mỗi (store,item) về lưới ngày liên tục, +cờ is_imputed
 [4] merge exog: oil (nội suy mọi ngày), holidays (cờ national/regional/local), onpromotion
-[5] clip âm→0, fill onpromotion→0
-   │  features.add_all_features(train_end=...)   ← group-mean chỉ tính trên train (chống leakage)
+[5] clip âm→0 (giữ cờ return để EDA), fill onpromotion→0
+   │  loader.prepare_holdout_panel()              ← fixed panel theo forecast origin
+   │  features.add_all_features(train_end=...)    ← lag/rolling/group-mean chỉ dùng lịch sử train
    ▼
 [6] feature engineering (xem dưới) → log1p(clip) target
    │  preprocessor.preprocess()
@@ -226,13 +227,15 @@ data/raw/*.csv
 - **Fourier**: weekly K=3, yearly K=2 (mùa vụ liên tục, exog nền cho SARIMAX).
 - **Lag**: `unit_sales_lag_{1,7,14,28,30,60,90,365}` theo từng chuỗi.
 - **Rolling**: mean/std/median cửa sổ 7/14/30 (shift(1) chống leakage).
-- **Group-mean** (train-only): store_avg, item_avg, family_avg, series_dow_avg.
+- **Group-mean**: store_avg, item_avg, family_avg, series_dow_avg; fit train-only,
+  leave-one-out trên train và freeze khi forecast.
 - **Payday** (lương Ecuador 15 & cuối tháng): is_payday, days_since/to_payday.
 - **Promo**: promo_rolling_rate, promo_count_7/14/30, days_since_last/until_next_promo.
-- **Zero-sales**: zero_sales_last_28 (proxy hết hàng).
-- **Exog Favorita**: dcoilwtico + oil_lag_7, holiday flags, perishable (cờ + trọng số NWRMSLE), is_imputed.
+- **Zero-sales**: zero_sales_last_28 (ngày ghi nhận bán 0; không suy diễn stockout).
+- **Exog Favorita**: dcoilwtico + oil_lag_7, holiday/event flags riêng, perishable
+  (cờ + trọng số NWRMSLE), is_imputed.
 
-> Cache `data/cleaned/train_cleaned.feather` giữ phần clean+zero-fill (nặng); feature áp dụng lúc load (rẻ, theo config). `data.use_cleaned: true` (mặc định) tự dùng cache, tự fallback build từ raw nếu chưa có.
+> Cache `data/cleaned/train_cleaned.feather` giữ phần clean+zero-fill (nặng); feature áp dụng lúc load. Cache mới có manifest cấu hình; cache legacy không có manifest sẽ bị từ chối. Rebuild một lần bằng `python scripts/clean_data.py`.
 
 ---
 
@@ -262,13 +265,15 @@ demand_forecasting/
 - **GPU/CPU:** XGBoost & LSTM ưu tiên CUDA nếu có (cấu hình PyTorch cu118). Không có GPU / GPU yếu → `--set model.device=cpu`.
 - **Tài nguyên:** `train.csv` ~125M dòng. `clean_data.py` load toàn bộ → lọc cluster 1 → zero-fill ra **~12.46M dòng (~4.5 GB RAM, cache feather 291 MB)**; lần build đầu mất **vài phút–vài chục phút** (tùy I/O đĩa). Train sau đó dùng cache → nhanh.
 - **Chẩn đoán độ thưa:** `python scripts/measure_sparsity.py` (đo tỉ lệ implicit-zero + ước lượng RAM sau reindex).
-- **Chạy test:** `python -m pytest tests/ -q` (33 test: cleaner, features, loader, preprocessor, metrics, config).
+- **Chạy test:** `python -m pytest tests/ -q` (44 test: cleaner, features, loader, preprocessor, metrics, config, comparison, CV, model flags).
 
 ---
 
 ## Trạng thái & bước tiếp
 
-✅ **Đã xong (data layer, sẵn sàng model input):** zero-fill bound first-sale, feature engineering đầy đủ (đã chống leakage group-mean), cache feather, EDA trực quan tiếng Việt. Tests 33/33 pass. Chi tiết: `plans/reports/status-260530-1122-favorita-eda-fe-model-ready.md`.
+✅ **Đã xong (data layer, sẵn sàng baseline tiểu luận):** zero-fill bound first-sale,
+fixed pseudo-holdout panel, origin-safe target features, weighted NWRMSLE, cache validation,
+EDA trực quan tiếng Việt. Tests 44/44 pass.
 
 ⏭ **Bước tiếp (model layer):**
 1. Chọn `(p,d,q)(P,D,Q)₇` thật cho ARIMA/SARIMAX qua ACF/PACF (notebook mục 9) — hiện đang placeholder `(1,1,1)`.
@@ -279,5 +284,6 @@ demand_forecasting/
 - **Validate chưa bật mặc định** — `base.yaml` chỉ có train+test; thêm `val_start/val_end` nếu cần (xem A.2).
 - **ARIMA/SARIMAX order là placeholder `(1,1,1)`** → cần tune qua ACF/PACF, metric hiện chưa phản ánh năng lực thật.
 - **XGBoost qua `train.py` có thể treo ở bước predict trên GPU yếu** → dùng `--set model.device=cpu`.
-- **Group-mean trong CV walk-forward** (`compare_cv.py`) chưa tính per-fold → còn leak nhẹ; sửa trước khi lấy số CV cuối cho luận văn. (Đường `train.py`/`evaluate.py` single-eval đã sạch.)
+- **Pseudo-holdout cold start:** chỉ gồm series đã xuất hiện gần forecast origin; Kaggle test thật có panel chính thức nên cần xử lý cold start riêng nếu làm submission.
+- **Oil:** hợp lệ trong benchmark local vì file có dữ liệu tới horizon, nhưng khi triển khai thực tế cần thay bằng forecast hoặc scenario.
 - **`docs/` và `plans/` bị gitignore** — README (gốc) được track nên người clone vẫn thấy hướng dẫn này; chi tiết phương pháp trong `docs/` chỉ có ở máy local.
