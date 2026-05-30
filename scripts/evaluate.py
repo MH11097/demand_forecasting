@@ -115,7 +115,9 @@ def evaluate(
     df, _ = load_raw_data(config)
     # chọn mẫu đại diện chuỗi cho per-series models (theo series_sample config)
     df = select_series(df, config)
-    df = add_all_features(df, feature_cfg=config.get("features", {}))
+    # train_end → group-mean encodings train-only (chống leakage)
+    df = add_all_features(df, feature_cfg=config.get("features", {}),
+                          train_end=config.get("split", {}).get("train_end"))
     if config.get("use_log_sales", False):
         typer.echo("Applying log1p transform to Sales and derived features...")
         df = apply_log_transform(df)

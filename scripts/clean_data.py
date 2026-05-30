@@ -19,7 +19,8 @@ def main():
     parser = argparse.ArgumentParser(description="Clean Favorita Grocery Sales data")
     parser.add_argument("--raw-dir",  default=None,           help="Raw data directory (override config)")
     parser.add_argument("--out-dir",  default="data/cleaned", help="Output directory")
-    parser.add_argument("--format",   default="csv", choices=["feather", "csv"])
+    parser.add_argument("--format",   default="feather", choices=["feather", "csv"],
+                        help="feather khuyến nghị: 12.5M dòng sau zero-fill, CSV rất nặng")
     parser.add_argument("--verbose",  action="store_true",    help="Print quality report")
     args = parser.parse_args()
 

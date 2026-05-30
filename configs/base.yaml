@@ -18,7 +18,9 @@ data:
   cleaned_dir: data/cleaned
   train_file: train.csv
   test_file: test.csv          # Kaggle test KHÔNG có nhãn unit_sales -> chỉ để submit
-  use_cleaned: false
+  # true → load cache data/cleaned/train_cleaned.feather (nhanh); tự fallback build từ raw
+  # nếu chưa có cache. Tạo cache: `python scripts/clean_data.py`.
+  use_cleaned: true
   # Bảng metadata/exog join vào train (xem cleaner.py).
   files:
     stores: stores.csv
@@ -43,6 +45,13 @@ schema:
 store_filter:
   by: cluster
   value: [1]
+
+# Làm sạch dữ liệu. zero_fill: reindex mỗi chuỗi (store,item) thành lưới ngày LIÊN TỤC
+# từ ngày bán ĐẦU→CUỐI của chuỗi (Favorita bỏ qua ngày bán 0 → ~40% ngày thiếu dòng;
+# nếu không điền, lag/rolling dịch theo dòng ≠ theo ngày → sai). Bound theo first-sale
+# để KHÔNG bịa zero giả cho giai đoạn sản phẩm chưa ra đời. Thêm cờ is_imputed.
+clean:
+  zero_fill: true
 
 # Bật/tắt từng nguồn exogenous (join trong cleaner, build feature trong features.py).
 exog:

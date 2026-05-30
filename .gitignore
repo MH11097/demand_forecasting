@@ -1,5 +1,11 @@
 # Data — giữ data/ trên git để share, chỉ ignore raw data nặng
 results/
+data/raw/*.csv
+data/raw/*.7z
+# Cache clean+zero-fill: chia sẻ train_cleaned.feather (zstd ~72MB) để mọi người dùng
+# chung, KHỎI xử lý lại; các feather khác vẫn ignore.
+*.feather
+!data/cleaned/train_cleaned.feather
 
 # Python
 __pycache__/

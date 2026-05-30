@@ -14,6 +14,7 @@ _NO_SCALE = {
     "unit_sales", "store_nbr", "item_nbr", "series_id", "store_idx", "item_idx",
     "id", "cluster", "class", "date", "is_weekend", "onpromotion", "perishable",
     "is_holiday", "holiday_national", "holiday_regional", "holiday_local",
+    "is_imputed", "is_payday",   # cờ binary mới (zero-fill + ngày lương) → giữ 0/1
 }
 
 

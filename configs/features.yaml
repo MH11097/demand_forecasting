@@ -20,9 +20,10 @@ features:
   use_fourier: true
 
   # --- Nhóm 3: Lag features (unit_sales_lag_<n>), group theo series_id ---
-  # 1,7: ngắn hạn; 14,30: trung hạn; 60,90: dài hạn (khớp horizon 90)
+  # 1,7: ngắn hạn; 14,28,30: trung hạn (28=chu kỳ lương 4 tuần); 60,90: dài hạn;
+  # 365: mùa vụ năm (chỉ có nghĩa sau zero-fill → chuỗi liên tục theo ngày).
   use_lag: true
-  lag_windows: [1, 7, 14, 30, 60, 90]
+  lag_windows: [1, 7, 14, 28, 30, 60, 90, 365]
 
   # --- Nhóm 4: Rolling features (mean/std/median) ---
   use_rolling: true
@@ -31,11 +32,18 @@ features:
 
   # --- Nhóm 5: Group-mean encodings ---
   # series_dow_avg: baseline (store_nbr,item_nbr) theo thứ trong tuần
-  # store_avg, item_avg: mức bán trung bình theo store / item
+  # store_avg, item_avg, family_avg: mức bán trung bình theo store / item / nhóm hàng
   use_group_mean: true
 
+  # --- Nhóm 5b: Payday (lương Ecuador 15 & cuối tháng) + Zero-sales counts ---
+  # payday:     is_payday, days_since_payday, days_to_payday (cầu tăng hậu lương)
+  # zero_sales: zero_sales_last_28 (đếm ngày bán 0 → proxy hết hàng/độ biến động)
+  use_payday: true
+  use_zero_sales: true
+
   # --- Nhóm 6: Exogenous Favorita (chỉ áp dụng khi exog.* bật trong base.yaml) ---
-  # promo:      onpromotion + promo_rolling_rate (tỉ lệ KM gần đây theo chuỗi)
+  # promo:      onpromotion + promo_rolling_rate + promo_count_7/14/30
+  #             + days_since_last_promo + days_until_next_promo (onpromotion biết trước)
   # oil:        dcoilwtico (nội suy) + oil_lag_7
   # holiday:    is_holiday + cờ theo type/locale (national/regional/local)
   # perishable: perishable (cờ hàng dễ hỏng, đồng thời là trọng số NWRMSLE)
@@ -50,9 +58,13 @@ features:
   # Time (10):       year, month, weekofyear, dayofmonth, dayofweek, is_weekend,
   #                  month_sin/cos, dow_sin/cos
   # Fourier (10):    fourier_w_sin/cos_1..3 (6), fourier_y_sin/cos_1..2 (4)
-  # Lag (6):         unit_sales_lag_1/7/14/30/60/90
+  # Lag (8):         unit_sales_lag_1/7/14/28/30/60/90/365
   # Rolling (9):     unit_sales_rolling_mean/std/median_7/14/30
-  # Group-mean (3):  series_dow_avg, store_avg, item_avg
-  # Exog:            onpromotion, promo_rolling_rate, dcoilwtico, oil_lag_7,
+  # Group-mean (4):  series_dow_avg, store_avg, item_avg, family_avg
+  # Payday (3):      is_payday, days_since_payday, days_to_payday
+  # Zero-sales (1):  zero_sales_last_28
+  # Exog:            onpromotion, promo_rolling_rate, promo_count_7/14/30,
+  #                  days_since_last_promo, days_until_next_promo, dcoilwtico, oil_lag_7,
   #                  is_holiday (+ type/locale flags), perishable
+  # Clean flag (1):  is_imputed (1 = dòng zero-fill chèn thêm)
   # Raw/idx:         store_nbr, item_nbr (XGBoost feature); store_idx, item_idx (LSTM embedding)

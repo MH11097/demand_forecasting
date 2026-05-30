@@ -26,16 +26,15 @@ def _add_series_id(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _densify(df: pd.DataFrame, config: dict) -> pd.DataFrame:
-    """Điền đủ lưới (series_id × date) trong khoảng ngày, gán unit_sales=0 cho ngày thiếu.
+    """[Legacy] Densify ở tầng loader (sau merge exog) — giữ cho tương thích/tiện ích.
 
-    Favorita THƯA: cặp (store,item) không bán sẽ không có dòng -> lag/rolling lệch nếu
-    bỏ qua. Densify đảm bảo chuỗi liên tục theo ngày. ⚠ TỐN BỘ NHỚ (nở dữ liệu) -> mặc
-    định TẮT; chỉ bật khi store_filter đủ hẹp (ví dụ 1 store). Bật qua config: densify=true.
+    Zero-fill chuẩn nay nằm ở cleaner.reindex_fill_dates (chạy TRƯỚC merge exog trong
+    build_dataset → exog theo ngày gán đúng cho ngày chèn). Hàm này chỉ kích hoạt khi
+    config.densify=true và bound theo NGÀY BÁN ĐẦU→CUỐI của TỪNG chuỗi (không toàn cục).
     """
     if not config.get("densify", False):
         return df
 
-    full_dates = pd.date_range(df["date"].min(), df["date"].max(), freq="D")
     static_cols = [
         c for c in ["store_nbr", "item_nbr", "city", "state", "type", "cluster",
                     "family", "class", "perishable"] if c in df.columns
@@ -45,6 +44,8 @@ def _densify(df: pd.DataFrame, config: dict) -> pd.DataFrame:
 
     out = []
     for sid, g in df.groupby("series_id", sort=False):
+        # bound per-series: chỉ điền trong khoảng sống của chuỗi (tránh zero giả)
+        full_dates = pd.date_range(g["date"].min(), g["date"].max(), freq="D")
         g = g.set_index("date").reindex(full_dates)
         g.index.name = "date"
         g["series_id"] = sid
@@ -61,22 +62,36 @@ def _densify(df: pd.DataFrame, config: dict) -> pd.DataFrame:
 
 
 def load_raw_data(config: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Load + join + clean (cleaner.build_dataset) → series_id → densify → sort.
+    """Load + join + clean + zero-fill (cleaner.build_dataset) → series_id → sort.
 
+    Zero-fill ngày thiếu đã thực hiện trong build_dataset (clean.zero_fill, mặc định bật).
     Returns:
         (df, df) — trả 2 lần cùng DataFrame để giữ chữ ký tương thích pipeline.
     """
     df = cleaner.build_dataset(config)
     df = _add_series_id(df)
-    df = _densify(df, config)
     df = df.sort_values(["series_id", "date"]).reset_index(drop=True)
     return df, df
 
 
 def load_cleaned_data(config: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Load CSV đã clean sẵn (đã qua cleaner.build_dataset + save)."""
+    """Load dataset đã clean+zero-fill sẵn (cleaner.build_dataset → save).
+
+    Ưu tiên feather (12.5M dòng sau zero-fill → CSV quá nặng); fallback CSV. Feature engineering
+    áp dụng SAU khi load (rẻ, phụ thuộc config) — file cache chỉ giữ phần join+zero-fill (nặng).
+    """
     cleaned_dir = Path(config["data"]["cleaned_dir"])
-    df = pd.read_csv(cleaned_dir / "train_cleaned.csv", low_memory=False)
+    feather_path = cleaned_dir / "train_cleaned.feather"
+    csv_path = cleaned_dir / "train_cleaned.csv"
+    if feather_path.exists():
+        df = pd.read_feather(feather_path)
+    elif csv_path.exists():
+        df = pd.read_csv(csv_path, low_memory=False)
+    else:
+        # chưa materialize cache → fallback dựng từ raw (an toàn trên checkout mới)
+        print(f"[loader] Cache {feather_path} chưa có → build từ raw (chạy "
+              f"`python scripts/clean_data.py` để cache cho lần sau).")
+        return load_raw_data(config)
 
     if "date" in df.columns:
         df["date"] = pd.to_datetime(df["date"])

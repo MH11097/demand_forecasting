@@ -77,12 +77,23 @@ def join_metadata(train: pd.DataFrame, stores: pd.DataFrame | None,
 
 
 def merge_oil(df: pd.DataFrame, oil: pd.DataFrame | None) -> pd.DataFrame:
-    """Merge giá dầu theo date; nội suy ngày thiếu (cuối tuần/lễ không có giá)."""
+    """Merge giá dầu theo date; nội suy CHO MỌI NGÀY LỊCH (không chỉ ngày có trong oil.csv).
+
+    oil.csv chỉ có dòng cho ngày giao dịch (thiếu hẳn cuối tuần/lễ). Nếu chỉ interpolate
+    trong các dòng sẵn có rồi left-merge, các ngày lịch vắng mặt khỏi oil.csv sẽ NaN
+    (sau zero-fill, ~30% ngày là cuối tuần → NaN hàng loạt). Khắc phục: reindex oil về
+    DẢI NGÀY LIÊN TỤC (phủ cả khoảng của df) rồi nội suy → mọi ngày có giá dầu.
+    """
     if oil is None:
         return df
     oil = oil.sort_values("date").copy()
-    # dcoilwtico thiếu nhiều ngày -> nội suy tuyến tính + ffill/bfill 2 đầu
+    lo = min(oil["date"].min(), df["date"].min())
+    hi = max(oil["date"].max(), df["date"].max())
+    full = pd.date_range(lo, hi, freq="D")
+    oil = oil.set_index("date").reindex(full).rename_axis("date")
+    # nội suy tuyến tính + ffill/bfill 2 đầu trên lưới ngày đầy đủ
     oil["dcoilwtico"] = oil["dcoilwtico"].interpolate(method="linear").ffill().bfill()
+    oil = oil.reset_index()
     return df.merge(oil, on="date", how="left")
 
 
@@ -154,6 +165,53 @@ def fill_onpromotion(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def reindex_fill_dates(df: pd.DataFrame) -> pd.DataFrame:
+    """Densify mỗi chuỗi (store_nbr, item_nbr) thành lưới ngày LIÊN TỤC.
+
+    Favorita train.csv KHÔNG ghi ngày bán = 0 (implicit zeros) → ~40% ngày trong khoảng
+    sống của chuỗi bị thiếu dòng. Nếu để vậy, groupby.shift(lag) dịch theo DÒNG chứ không
+    theo NGÀY → mọi lag/rolling sai lệch. Hàm này reindex mỗi chuỗi về dải ngày liên tục.
+
+    ⚠ Bound theo NGÀY BÁN ĐẦU TIÊN → CUỐI của TỪNG chuỗi (không phải 2013-01-01 toàn cục):
+    94.6% chuỗi Favorita ra đời giữa chừng → reindex toàn cục sẽ bịa hàng triệu "zero giả"
+    cho giai đoạn sản phẩm chưa tồn tại, làm lệch model + group-mean encodings.
+
+    Gọi TRƯỚC merge_oil/merge_holidays để exog theo ngày (giá dầu, cờ lễ) gán ĐÚNG cho
+    ngày chèn thêm (vd ngày 25/12 thiếu sẽ nhận holiday=1, không bị ffill nhầm từ 24/12).
+
+    Cột thêm: is_imputed (1 = dòng chèn zero-fill, 0 = dòng quan sát thật).
+    Vectorized: build full grid bằng index.repeat thay vì loop từng chuỗi.
+    """
+    key = ["store_nbr", "item_nbr"]
+    if not set(key + ["date"]).issubset(df.columns):
+        return df
+
+    spans = df.groupby(key)["date"].agg(min_date="min", max_date="max")
+    spans["ndays"] = (spans["max_date"] - spans["min_date"]).dt.days + 1
+
+    # nở mỗi chuỗi thành ndays dòng, gán date = min_date + offset (0..ndays-1)
+    grid = spans.loc[spans.index.repeat(spans["ndays"].to_numpy())].copy()
+    offset = grid.groupby(level=key).cumcount().to_numpy()
+    grid["date"] = grid["min_date"].to_numpy() + pd.to_timedelta(offset, unit="D")
+    grid = grid.reset_index()[key + ["date"]]
+
+    merged = grid.merge(df, on=key + ["date"], how="left", indicator=True)
+    merged["is_imputed"] = (merged["_merge"] == "left_only").astype(int)
+    merged = merged.drop(columns="_merge")
+
+    merged["unit_sales"] = merged["unit_sales"].fillna(0.0)
+    if "onpromotion" in merged.columns:
+        merged["onpromotion"] = merged["onpromotion"].fillna(0)
+
+    # thuộc tính tĩnh của chuỗi (store/item) → ffill/bfill trong từng chuỗi
+    static = [c for c in ["city", "state", "type", "cluster", "family", "class", "perishable"]
+              if c in merged.columns]
+    merged = merged.sort_values(key + ["date"]).reset_index(drop=True)
+    if static:
+        merged[static] = merged.groupby(key)[static].ffill().bfill()
+    return merged
+
+
 def apply_store_filter(df: pd.DataFrame, config: dict) -> pd.DataFrame:
     """Lọc 1 nhóm store theo store_filter.{by, value} (cluster/type/store_nbr)."""
     sf = config.get("store_filter")
@@ -198,6 +256,9 @@ def build_dataset(config: dict) -> pd.DataFrame:
     train, tables = load_raw(raw_dir, config)
     df = join_metadata(train, tables["stores"], tables["items"])
     df = apply_store_filter(df, config)          # lọc sớm -> nhẹ các bước sau
+    # zero-fill ngày thiếu (implicit zeros) TRƯỚC khi merge exog theo ngày & build lag/rolling
+    if config.get("clean", {}).get("zero_fill", True):
+        df = reindex_fill_dates(df)
     df = merge_oil(df, tables["oil"])
     df = merge_holidays(df, tables["holidays"])
     df = merge_transactions(df, tables["transactions"], config)
@@ -242,11 +303,14 @@ def validate(df: pd.DataFrame) -> dict:
 
 
 def save(df: pd.DataFrame, path: str, fmt: str = "csv") -> None:
-    """Lưu DataFrame ra csv hoặc feather."""
+    """Lưu DataFrame ra csv hoặc feather (feather nén zstd để chia sẻ qua git < 100MB)."""
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)
     if fmt == "feather":
-        df.reset_index(drop=True).to_feather(f"{out}.feather")
+        # zstd: 12.46M dòng 291MB (lz4 mặc định) -> ~72MB; read_feather tự giải nén
+        df.reset_index(drop=True).to_feather(
+            f"{out}.feather", compression="zstd", compression_level=19
+        )
     else:
         df.to_csv(f"{out}.csv", index=False)
     print(f"Saved {out}.{fmt} ({len(df):,} rows)")

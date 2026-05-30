@@ -100,7 +100,9 @@ def _train_single(model_name: str, overrides: dict, experiment_name: str = ""):
 
     typer.echo("Adding features...")
     feature_cfg = config.get("features", {})
-    df = add_all_features(df, feature_cfg=feature_cfg)
+    # train_end → group-mean encodings chỉ tính trên train (chống leakage val/test)
+    train_end = config.get("split", {}).get("train_end")
+    df = add_all_features(df, feature_cfg=feature_cfg, train_end=train_end)
 
     if config.get("use_log_sales", False):
         typer.echo("Applying log1p transform to sales and derived features...")
