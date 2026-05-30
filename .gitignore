@@ -67,7 +67,8 @@ docs
 # OS
 .DS_Store
 Thumbs.db
-
+.agents/
+.codex/
 # Misc
 *.log
 *.tmp

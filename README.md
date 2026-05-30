@@ -1,25 +1,17 @@
-# Favorita Grocery Sales Forecasting — So sánh mô hình dự báo cầu
+# Favorita Grocery Sales Forecasting — So sánh mô hình dự báo
 
 Khung so sánh nhiều mô hình dự báo chuỗi thời gian trên bộ **Corporación Favorita Grocery Sales Forecasting** (Kaggle: `favorita-grocery-sales-forecasting`). Tất cả mô hình dùng **cùng dữ liệu, cùng feature, cùng split** để so sánh công bằng theo metric chính thức **NWRMSLE**.
 
-> Đọc hết README này là nắm được: chạy file nào để train/test, **cấu hình thực nghiệm** (model, split, dự báo, metric), **cách xử lý dữ liệu** (clean, zero-fill, feature), và cấu trúc dự án. Chi tiết phương pháp (tiếng Việt) ở `docs/chuong-2-du-lieu-va-phuong-phap.md`; EDA trực quan ở `notebooks/01_eda.ipynb`.
-
 ---
-
-## ⚡ TL;DR — Chạy file nào?
 
 | Việc | Lệnh |
 |------|------|
 | **Train + đánh giá test 1 model** | `python scripts/train.py train --model xgboost` |
-| Train **tất cả** model | `python scripts/train.py train --model all` |
 | Train **tương tác** (menu chọn model + tham số) | `python scripts/train.py train` |
 | **Cross-validation** (đánh giá kỹ 1 model) | `python scripts/evaluate.py --model xgboost --cv expanding --n-splits 3 --eval-days 90` |
 | **So sánh nhiều model** (sắp theo NWRMSLE) | `python scripts/compare_cv.py --models arima,sarimax,prophet,xgboost,lstm` |
 | Tạo **cache dữ liệu** (chạy 1 lần, train sau sẽ nhanh) | `python scripts/clean_data.py` |
 | **EDA** trực quan | mở `notebooks/01_eda.ipynb` |
-
-> ⚠ `train.py` là app nhiều lệnh con → **phải có chữ `train`**: `python scripts/train.py train --model ...` (không phải `train.py --model ...`).
-> ⚠ XGBoost mặc định ưu tiên GPU; nếu treo lúc predict trên máy có GPU yếu, thêm `--set model.device=cpu`.
 
 ---
 
