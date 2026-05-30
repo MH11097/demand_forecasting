@@ -1,0 +1,71 @@
+# Data — giữ data/ trên git để share, chỉ ignore raw data nặng
+results/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.venv/
+*.whl
+
+# Models & artifacts — file model nặng, không đẩy lên git
+*.pt
+*.pth
+*.ckpt
+*.pkl
+*.joblib
+*.h5
+*.hdf5
+*.onnx
+*.safetensors
+*.bin
+
+# AI / ML — logs, checkpoints, runs của các framework
+wandb/
+mlruns/
+mlflow/
+lightning_logs/
+tensorboard_logs/
+runs/
+outputs/
+logs/
+*.tfevents*
+ray_results/
+optuna_studies/
+
+# Hugging Face
+.cache/
+huggingface/
+
+# Environment
+.env
+.env.*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Claude Code
+.claude/
+CLAUDE.md
+plans
+docs
+# OS
+.DS_Store
+Thumbs.db
+
+# Misc
+*.log
+*.tmp
+
+EXPERIMENT_REPORT.md
+HUONG_DAN_UV.md
+
