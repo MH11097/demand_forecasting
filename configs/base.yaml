@@ -1,0 +1,90 @@
+# ============================================================
+# Base config — Favorita Grocery Sales Forecasting
+# (Kaggle: favorita-grocery-sales-forecasting)
+# ============================================================
+# Multi-file dataset:
+#   train.csv            [id, date, store_nbr, item_nbr, unit_sales, onpromotion]
+#   stores.csv           [store_nbr, city, state, type, cluster]
+#   items.csv            [item_nbr, family, class, perishable]
+#   transactions.csv     [date, store_nbr, transactions]
+#   oil.csv              [date, dcoilwtico]
+#   holidays_events.csv  [date, type, locale, locale_name, description, transferred]
+# 54 stores × ~4100 items, daily 2013-01-01 → 2017-08-15. Metric chính thức: NWRMSLE.
+# unit_sales có thể ÂM (trả hàng) -> clip về 0; onpromotion có NaN -> False.
+# Quá lớn để fit toàn bộ -> store_filter lọc 1 NHÓM store (cluster/type) cho mọi model.
+
+data:
+  raw_dir: data/raw
+  cleaned_dir: data/cleaned
+  train_file: train.csv
+  test_file: test.csv          # Kaggle test KHÔNG có nhãn unit_sales -> chỉ để submit
+  use_cleaned: false
+  # Bảng metadata/exog join vào train (xem cleaner.py).
+  files:
+    stores: stores.csv
+    items: items.csv
+    transactions: transactions.csv
+    oil: oil.csv
+    holidays: holidays_events.csv
+
+# Entity là CẶP (store_nbr, item_nbr) -> series_id = pd.factorize (tránh đụng độ ở
+# cardinality lớn 54×4100). Mọi lag/rolling/sequence group theo series_id.
+schema:
+  entity_cols: [store_nbr, item_nbr]   # khoá định danh từng chuỗi
+  group_col: series_id                 # dẫn xuất = factorize((store_nbr, item_nbr))
+  time_col: date
+  target_col: unit_sales
+  freq: D
+
+# Lọc 1 NHÓM store để bộ dữ liệu vừa fit (toàn bộ ~125M dòng là không khả thi).
+# Mọi model (per-series & global) dùng CÙNG subset này + cùng temporal split.
+#   by: cluster | type | store_nbr     value: list các id của nhóm đã chọn
+# Dry-run nhanh: by=store_nbr, value=[44] (1 store type-A). null = không lọc.
+store_filter:
+  by: cluster
+  value: [1]
+
+# Bật/tắt từng nguồn exogenous (join trong cleaner, build feature trong features.py).
+exog:
+  use_oil: true            # giá dầu (proxy kinh tế Ecuador), nội suy ngày thiếu
+  use_holidays: true       # lễ/sự kiện -> cờ boolean theo type/locale
+  use_onpromotion: true    # khuyến mãi theo (store_nbr, item_nbr, date)
+  use_perishable: true     # cờ hàng dễ hỏng (trọng số NWRMSLE = 1.25)
+  use_transactions: false  # ⚠ rò rỉ: chỉ có cho ngày train, thiếu ở horizon -> mặc định tắt
+
+split:
+  # Kaggle test (16 ngày) không có nhãn -> cắt ~90 ngày cuối train làm test có nhãn thật.
+  train_end: "2017-05-15"      # train toàn bộ đến ngày này
+  test_start: "2017-05-16"     # test = ~92 ngày cuối (khớp horizon dự báo)
+  test_end: "2017-08-15"
+
+forecast_horizon: 90           # ngày dự báo (Kaggle test thực tế = 16; xem README)
+
+seed: 42
+
+# Sample per-series cho ARIMA/SARIMAX/Prophet (số chuỗi trong 1 cluster vẫn lớn).
+# null = dùng tất cả; hoặc set n_series để chọn mẫu đại diện đa dạng volume.
+series_sample:
+  n_series: 40                 # ~30-50 chuỗi store-item đại diện trong nhóm đã lọc
+  strategy: stratified_volume  # chọn trải đều theo tổng unit_sales (cao→thấp), seed cố định
+
+# unit_sales lệch phải mạnh + có giá trị 0/âm. log1p(clip(.,0)) khớp đúng công thức
+# NWRMSLE (RMSLE) -> MSE trên log ≈ tối ưu metric. BẬT mặc định.
+use_log_sales: true
+
+# Chiến lược dự báo nhiều bước:
+# - "direct": 1 model dự đoán đúng điểm T+H
+# - "multioutput": 1 model output H giá trị cùng lúc
+# - "recursive": train T+1, lăn bánh H lần
+forecast_strategy: "multioutput"
+
+# Hàm loss khi train (xem chi tiết torch_utils.get_loss_fn):
+# - "mse": ổn định (mặc định, hợp với log target ≈ NWRMSLE)
+# - "mae" | "mape"
+loss_fn: "mse"
+
+metrics:
+  primary: nwrmsle             # metric chính thức của competition (perishable-weighted RMSLE)
+  secondary: [rmse, mae, mape]
+
+results_dir: results

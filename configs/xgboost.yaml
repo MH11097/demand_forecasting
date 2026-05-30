@@ -1,0 +1,24 @@
+# ============================================================
+# XGBoost — global model config cho Favorita dataset
+# ============================================================
+# Global model: train trên TOÀN BỘ chuỗi trong nhóm store đã lọc (store_filter).
+# store_nbr/item_nbr + exog (onpromotion, oil, holiday, perishable) là feature.
+# Feature set chọn động — tất cả numeric ngoài target/ID/date.
+
+# Global model -> override sample của base.yaml để dùng TẤT CẢ chuỗi trong nhóm.
+series_sample:
+  n_series: null
+
+model:
+  name: xgboost
+  skip_scaling: true      # XGBoost (tree-based) không cần scaling
+  # device: ưu tiên GPU tự động ("cuda" nếu có, else "cpu"). Ép cpu: device: cpu
+  # device: cuda
+  n_estimators: 500
+  max_depth: 9
+  learning_rate: 0.05
+  subsample: 1.0
+  colsample_bytree: 0.8
+  reg_alpha: 1.5
+  reg_lambda: 2.5
+  early_stopping_rounds: 50

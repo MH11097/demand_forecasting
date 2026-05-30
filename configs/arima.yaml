@@ -1,0 +1,12 @@
+# ============================================================
+# ARIMA — per-series config cho Favorita dataset
+# ============================================================
+# Mỗi chuỗi (store_nbr, item_nbr) được fit riêng một model ARIMA univariate.
+# order (p,d,q): placeholder (1,1,1) — cần tinh chỉnh qua ACF/PACF
+# per-series. ARIMA/SARIMAX chia sẻ cùng order (Box-Jenkins workflow).
+
+model:
+  name: arima
+  order: [1, 1, 1]   # (p,d,q) — d=1 loại bỏ trend; tinh chỉnh qua tune_arima_grid.py
+  trend: "n"          # d=1 đã xử lý trend → không cần constant term
+  skip_scaling: true  # ARIMA dùng giá trị gốc (log-space nếu use_log_sales=true)

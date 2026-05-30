@@ -1,0 +1,58 @@
+# ============================================================
+# Feature Selection Config — Favorita Grocery Sales Forecasting
+# ============================================================
+# Bật/tắt từng nhóm feature bằng true/false. Override từ CLI:
+#   --set features.use_lag=true
+#   --set features.lag_windows=[1,7,30,90]
+# Lưu ý: nhóm exog (oil/holiday/promo/perishable) còn bị chặn bởi exog.* trong base.yaml.
+# ============================================================
+
+features:
+
+  # --- Nhóm 1: Time features (từ cột date) ---
+  # year, month, weekofyear, dayofmonth, dayofweek, is_weekend
+  # + cyclical: month_sin/cos, dow_sin/cos
+  use_time: true
+
+  # --- Nhóm 2: Fourier seasonality (weekly + yearly) ---
+  # fourier_w_*: weekly P=7 K=3 (6 cột); fourier_y_*: yearly P=365.25 K=2 (4 cột)
+  # Dùng chung làm exogenous nền cho SARIMAX (bổ trợ exog thực của Favorita).
+  use_fourier: true
+
+  # --- Nhóm 3: Lag features (unit_sales_lag_<n>), group theo series_id ---
+  # 1,7: ngắn hạn; 14,30: trung hạn; 60,90: dài hạn (khớp horizon 90)
+  use_lag: true
+  lag_windows: [1, 7, 14, 30, 60, 90]
+
+  # --- Nhóm 4: Rolling features (mean/std/median) ---
+  use_rolling: true
+  rolling_windows: [7, 14, 30]
+  rolling_stats: [mean, std, median]
+
+  # --- Nhóm 5: Group-mean encodings ---
+  # series_dow_avg: baseline (store_nbr,item_nbr) theo thứ trong tuần
+  # store_avg, item_avg: mức bán trung bình theo store / item
+  use_group_mean: true
+
+  # --- Nhóm 6: Exogenous Favorita (chỉ áp dụng khi exog.* bật trong base.yaml) ---
+  # promo:      onpromotion + promo_rolling_rate (tỉ lệ KM gần đây theo chuỗi)
+  # oil:        dcoilwtico (nội suy) + oil_lag_7
+  # holiday:    is_holiday + cờ theo type/locale (national/regional/local)
+  # perishable: perishable (cờ hàng dễ hỏng, đồng thời là trọng số NWRMSLE)
+  use_promo: true
+  use_oil: true
+  use_holiday: true
+  use_perishable: true
+
+  # ============================================================
+  # Tham khảo nhanh khi bật hết
+  # ============================================================
+  # Time (10):       year, month, weekofyear, dayofmonth, dayofweek, is_weekend,
+  #                  month_sin/cos, dow_sin/cos
+  # Fourier (10):    fourier_w_sin/cos_1..3 (6), fourier_y_sin/cos_1..2 (4)
+  # Lag (6):         unit_sales_lag_1/7/14/30/60/90
+  # Rolling (9):     unit_sales_rolling_mean/std/median_7/14/30
+  # Group-mean (3):  series_dow_avg, store_avg, item_avg
+  # Exog:            onpromotion, promo_rolling_rate, dcoilwtico, oil_lag_7,
+  #                  is_holiday (+ type/locale flags), perishable
+  # Raw/idx:         store_nbr, item_nbr (XGBoost feature); store_idx, item_idx (LSTM embedding)

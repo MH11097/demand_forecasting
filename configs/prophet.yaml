@@ -1,0 +1,19 @@
+# ============================================================
+# Prophet — per-series config cho Favorita dataset
+# ============================================================
+# Có ngoại sinh thực: onpromotion + oil đưa vào add_regressor; holidays Ecuador
+# qua holidays_events.csv (thay US calendar mặc định).
+# seasonality_mode=multiplicative: doanh số có biên độ mùa tỉ lệ với mức bán.
+
+model:
+  name: prophet
+  # Trend: độ linh hoạt changepoint (nhỏ=mượt, lớn=linh hoạt)
+  changepoint_prior_scale: 0.05
+  n_changepoints: 25
+  changepoint_range: 0.8
+  # Seasonality: nhân tính vì seasonal amplitude tỉ lệ với trend
+  seasonality_mode: multiplicative
+  seasonality_prior_scale: 10.0
+  # Holiday: lễ Ecuador (Prophet add_country_holidays('Ecuador') hoặc holidays_events.csv)
+  holidays_prior_scale: 10.0
+  skip_scaling: true   # Prophet tự xử lý scale nội bộ

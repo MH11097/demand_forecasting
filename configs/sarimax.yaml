@@ -1,0 +1,18 @@
+# ============================================================
+# SARIMAX — per-series config cho Favorita dataset
+# ============================================================
+# Exog = Fourier terms (weekly K=3, yearly K=2) + ngoại sinh thực (oil, holidays,
+# onpromotion) khi exog.* bật trong base.yaml. Favorita có exog thật -> giá trị hơn
+# Fourier synthetic. seasonal_order m=7 (tuần) là chu kỳ mạnh nhất.
+# order (p,d,q) chia sẻ với ARIMA theo Box-Jenkins workflow.
+
+model:
+  name: sarimax
+  order: [1, 1, 1]                   # (p,d,q) — placeholder, tinh chỉnh qua tune_sarimax_grid.py
+  # (P,D,Q,m): m=7 tuần. ⚠ D=0 (KHÔNG seasonal-difference): Fourier exog đã lo weekly+yearly
+  # seasonality; thêm seasonal differencing D=1 gây nổ forecast nhiều bước -> giữ D=0.
+  seasonal_order: [1, 0, 1, 7]       # seasonal ARMA nhẹ trên nền Fourier exog
+  trend: "n"                         # không thêm deterministic trend (Box-Jenkins chuẩn)
+  maxiter: 200                       # Kalman filter state-space lớn cần nhiều iterations
+  skip_scaling: true                 # SARIMAX dùng giá trị gốc (Fourier exog đúng scale)
+  # exog_columns không cần đặt — lấy tự động từ features.fourier_cols()

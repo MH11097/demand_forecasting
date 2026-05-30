@@ -1,0 +1,47 @@
+# ============================================================
+# LSTM — config cho Favorita dataset
+# ============================================================
+# Global model với dual embedding (store_emb + item_emb) nối với
+# continuous features trước LSTM. Entity = series_id = factorize(store_nbr,item_nbr).
+# Vocab embedding SUY RA TỪ DỮ LIỆU (số store/item trong nhóm đã lọc) — KHÔNG hardcode.
+# seq_len=90, forecast_horizon=90 khớp với horizon dự báo 90 ngày.
+
+# Global model -> override sample của base.yaml để dùng TẤT CẢ chuỗi trong nhóm.
+series_sample:
+  n_series: null
+
+# --- Target transform ---
+# log1p(unit_sales) → MSE trên log ≈ tối ưu NWRMSLE gián tiếp, gradient ổn định
+use_log_sales: true
+
+# --- Forecast strategy ---
+# multioutput: output vector H giá trị cùng lúc → ít error accumulation hơn recursive
+forecast_strategy: "multioutput"
+
+# --- Loss function ---
+# mse trên log-space ≈ NWRMSLE
+loss_fn: "mse"
+
+model:
+  name: lstm
+
+  # --- Architecture ---
+  hidden_size: 64
+  num_layers: 1
+  seq_len: 90           # cửa sổ đầu vào = 90 ngày (khớp forecast horizon)
+  store_emb_dim: 4      # chiều embedding store (vocab suy ra từ data)
+  item_emb_dim: 8       # chiều embedding item (vocab suy ra từ data — Favorita ~4100 item)
+
+  # --- Training ---
+  batch_size: 256
+  epochs: 100
+  learning_rate: 0.0005
+  dropout: 0.2
+  weight_decay: 0.0     # thử 1e-5 → 1e-3 nếu val_loss >> train_loss
+
+  # --- Forecast ---
+  forecast_horizon: 90  # H = số ngày dự báo (khớp test split 90 ngày)
+
+  # --- Early stopping ---
+  patience: 15          # dừng sau 15 epoch liên tiếp không cải thiện
+  min_delta: 0.0001     # cải thiện < 0.0001 coi như "không đổi"
