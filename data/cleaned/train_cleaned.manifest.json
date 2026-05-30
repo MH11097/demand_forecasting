@@ -1,0 +1,26 @@
+{
+  "cache_signature": {
+    "cache_schema_version": 2,
+    "clean": {
+      "zero_fill": true
+    },
+    "exog": {
+      "use_holidays": true,
+      "use_oil": true,
+      "use_transactions": false
+    },
+    "files": {
+      "holidays": "holidays_events.csv",
+      "items": "items.csv",
+      "oil": "oil.csv",
+      "stores": "stores.csv",
+      "transactions": "transactions.csv"
+    },
+    "store_filter": {
+      "by": "cluster",
+      "value": [
+        1
+      ]
+    }
+  }
+}
