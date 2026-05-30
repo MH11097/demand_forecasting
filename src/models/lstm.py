@@ -133,7 +133,7 @@ class LSTMModel(BaseModel):
 
     def train(self, train_df: pd.DataFrame, val_df: pd.DataFrame | None = None) -> dict:
         start = time.time()
-        features, targets, self.feature_cols = prepare_sequences(train_df)
+        features, targets, self.feature_cols = prepare_sequences(train_df, config=self.config)
 
         _train_h = 1 if self.forecast_strategy == "recursive" else self.forecast_horizon
         _out_sz  = self.forecast_horizon if self.forecast_strategy == "multioutput" else 1

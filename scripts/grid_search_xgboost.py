@@ -10,9 +10,9 @@ import pandas as pd
 import typer
 
 from src.data.features import add_all_features
-from src.data.loader import load_raw_data
+from src.data.loader import load_raw_data, prepare_holdout_panel
 from src.data.preprocessor import preprocess
-from src.evaluation.metrics import evaluate_all
+from src.evaluation.metrics import evaluate_all, weights_from_frame
 from src.models.xgboost_model import XGBoostModel
 from src.utils.config import load_config
 from src.utils.seed import set_seed
@@ -37,7 +37,12 @@ def grid_search(model_name: str = "xgboost"):
     # Load data + features 1 lần, preprocess 1 lần → dùng chung cho mọi combo
     typer.echo("Loading data & features...")
     df, _ = load_raw_data(config)
-    df = add_all_features(df, feature_cfg=config.get("features", {}))
+    df = prepare_holdout_panel(df, config)
+    df = add_all_features(
+        df,
+        feature_cfg=config.get("features", {}),
+        train_end=config.get("split", {}).get("train_end"),
+    )
 
     typer.echo("Preprocessing...")
     train_df, val_df, test_df, scaler = preprocess(df, config)
@@ -79,7 +84,7 @@ def grid_search(model_name: str = "xgboost"):
         model.train(train_df, val_df if len(val_df) > 0 else None)
         preds = model.predict(test_df)
         y_true = test_df["unit_sales"].values
-        metrics = evaluate_all(y_true, preds)
+        metrics = evaluate_all(y_true, preds, weights_from_frame(test_df))
         elapsed = time.time() - start
 
         typer.echo(

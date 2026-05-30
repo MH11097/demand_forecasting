@@ -130,7 +130,7 @@ plt.colorbar(sc, ax=ax, label="CV (std/mean)")
 top10 = store_stats.nlargest(10, "cv")
 for _, row in top10.iterrows():
     ax.annotate(
-        f" {int(row['Store'])}",
+        f" {int(row['series_id'])}",
         (row["mean"], row["std"]),
         fontsize=7, color="#c0392b", alpha=0.85,
     )

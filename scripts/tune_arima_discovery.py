@@ -44,7 +44,8 @@ def discover(
     typer.echo("Loading data...")
     df, _ = load_raw_data(config)
     df = filter_stores(df, config)
-    df = add_all_features(df)
+    df = add_all_features(df, feature_cfg=config.get("features", {}),
+                          train_end=config.get("split", {}).get("train_end"))
     train_df, _, _, _ = preprocess(df, config)
 
     stores = sorted(train_df["series_id"].unique())[:n_stores]

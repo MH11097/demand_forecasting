@@ -31,10 +31,10 @@ def main():
         result = load_and_predict(model_name)
         if result is None:
             continue
-        y_true, y_pred, dates = result
+        y_true, y_pred, dates, weights = result
         actual_agg, pred_agg, agg_dates = aggregate_by_date(y_true, y_pred, dates)
         predictions[display] = (actual_agg, pred_agg, agg_dates)
-        m = evaluate_all(y_true, y_pred)
+        m = evaluate_all(y_true, y_pred, weights)
         print(f"    ✓ {display}: NWRMSLE={m['nwrmsle']:.4f}, MAE={m['mae']:.1f}, RMSE={m['rmse']:.1f}")
 
     if not predictions:

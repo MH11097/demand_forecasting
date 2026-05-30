@@ -22,7 +22,7 @@ import yaml
 from src.data.features import add_all_features
 from src.data.loader import filter_stores, load_raw_data
 from src.data.preprocessor import preprocess
-from src.evaluation.metrics import evaluate_all
+from src.evaluation.metrics import evaluate_all, weights_from_frame
 from src.models.sarimax import SARIMAXModel
 from src.tuning.tuning_viz import (
     generate_tuning_report,
@@ -119,7 +119,8 @@ def grid_search(
     typer.echo("Loading data...")
     df, _ = load_raw_data(config)
     df = filter_stores(df, config)
-    df = add_all_features(df)
+    df = add_all_features(df, feature_cfg=config.get("features", {}),
+                          train_end=config.get("split", {}).get("train_end"))
     train_df, val_df, _, _ = preprocess(df, config)
     typer.echo(f"Data: {len(train_df)} train, {len(val_df)} val rows")
 
@@ -144,7 +145,11 @@ def grid_search(
                 start = time.time()
                 model.train(train_df, val_df)
                 elapsed = time.time() - start
-                metrics = evaluate_all(val_df["unit_sales"].values, model.predict(val_df))
+                metrics = evaluate_all(
+                    val_df["unit_sales"].values,
+                    model.predict(val_df),
+                    weights_from_frame(val_df),
+                )
                 results.append({**base, **metrics, "time_seconds": round(elapsed, 2)})
                 logger.info(f"  NWRMSLE={metrics['nwrmsle']:.6f} ({elapsed:.1f}s)")
         except Exception as e:

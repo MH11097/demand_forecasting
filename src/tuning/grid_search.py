@@ -12,7 +12,7 @@ import warnings
 
 import pandas as pd
 
-from src.evaluation.metrics import evaluate_all
+from src.evaluation.metrics import evaluate_all, weights_from_frame
 from src.models.prophet_model import ProphetModel
 
 logger = logging.getLogger(__name__)
@@ -74,7 +74,7 @@ def run_grid_search(
                 # Đánh giá trên validation set → metric chính là NWRMSLE (Kaggle)
                 predictions = model.predict(val_df)
                 y_true = val_df["unit_sales"].values
-                metrics = evaluate_all(y_true, predictions)
+                metrics = evaluate_all(y_true, predictions, weights_from_frame(val_df))
 
                 row = {**params, **metrics, "time_seconds": round(elapsed, 2)}
                 results.append(row)
@@ -127,7 +127,7 @@ def run_ablation_study(
 
                 predictions = model.predict(val_df)
                 y_true = val_df["unit_sales"].values
-                metrics = evaluate_all(y_true, predictions)
+                metrics = evaluate_all(y_true, predictions, weights_from_frame(val_df))
 
                 row = {
                     "experiment": exp_name,

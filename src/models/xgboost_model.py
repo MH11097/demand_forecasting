@@ -24,7 +24,11 @@ def _xgb_device() -> str:
 
 
 # Cột không dùng làm feature: target, composite/row ID, date, embedding index
-_EXCLUDE = {"unit_sales", "series_id", "id", "date", "store_idx", "item_idx"}
+_EXCLUDE = {
+    "unit_sales", "series_id", "id", "date", "store_idx", "item_idx",
+    # EDA-only indicators derived from same-day target; unavailable at forecast time.
+    "was_return", "returned_units",
+}
 
 # Cột bắt buộc phải có (store_nbr/item_nbr = categorical signal quan trọng nhất)
 _REQUIRED = ["store_nbr", "item_nbr"]
@@ -54,6 +58,18 @@ class XGBoostModel(BaseModel):
         numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
         # loại target/ID/date; giữ store_nbr và item_nbr
         candidates = [c for c in numeric_cols if c not in _EXCLUDE]
+        feature_cfg = self.config.get("features", {})
+        disabled = set()
+        if not feature_cfg.get("use_promo", True):
+            disabled.update(c for c in candidates if c == "onpromotion" or c.startswith("promo_"))
+            disabled.update({"days_since_last_promo", "days_until_next_promo"})
+        if not feature_cfg.get("use_oil", True):
+            disabled.update({"dcoilwtico", "oil_lag_7"})
+        if not feature_cfg.get("use_holiday", True):
+            disabled.update(c for c in candidates if "holiday" in c or "event" in c)
+        if not feature_cfg.get("use_perishable", True):
+            disabled.add("perishable")
+        candidates = [c for c in candidates if c not in disabled]
         # đảm bảo store_nbr, item_nbr luôn có (nếu tồn tại trong df)
         for col in _REQUIRED:
             if col in df.columns and col not in candidates:
@@ -63,17 +79,6 @@ class XGBoostModel(BaseModel):
 
     def train(self, train_df: pd.DataFrame, val_df: pd.DataFrame | None = None) -> dict:
         start = time.time()
-
-        # base.yaml không tách val (test = 90 ngày cuối). Early stopping cần val ->
-        # carve val từ ĐUÔI train theo thời gian (last val_days ngày) khi không có val_df.
-        # Cắt theo date để không leak tương lai và không vắt qua biên train/test.
-        if (val_df is None or len(val_df) == 0) and self.early_stopping_rounds:
-            val_days = self.config.get("model", {}).get("val_days", 42)
-            cutoff = train_df["date"].max() - pd.Timedelta(days=val_days)
-            mask = train_df["date"] > cutoff
-            if mask.any() and (~mask).any():
-                val_df = train_df[mask]
-                train_df = train_df[~mask]
 
         X_train = self._get_features(train_df)
         y_train = train_df["unit_sales"].values

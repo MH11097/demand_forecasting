@@ -21,9 +21,9 @@ import seaborn as sns
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.data.features import add_all_features, apply_log_transform
-from src.data.loader import filter_stores, load_raw_data
+from src.data.loader import filter_stores, load_raw_data, prepare_holdout_panel
 from src.data.preprocessor import preprocess
-from src.evaluation.metrics import evaluate_all
+from src.evaluation.metrics import evaluate_all, weights_from_frame
 from src.models.base import BaseModel
 from src.utils.config import load_config
 
@@ -165,11 +165,11 @@ def _find_latest_run(model_name: str) -> Path | None:
     return max(runs, key=lambda d: d.stat().st_mtime)
 
 
-def load_and_predict(model_name: str) -> tuple[np.ndarray, np.ndarray, pd.Series] | None:
+def load_and_predict(model_name: str) -> tuple[np.ndarray, np.ndarray, pd.Series, np.ndarray | None] | None:
     """Load model đã train, predict trên 30-day test window.
 
     Returns:
-        (y_true, y_pred, dates) hoặc None nếu load/predict fail
+        (y_true, y_pred, dates, weights) hoặc None nếu load/predict fail
     """
     run_dir = _find_latest_run(model_name)
     if run_dir is None:
@@ -187,15 +187,18 @@ def load_and_predict(model_name: str) -> tuple[np.ndarray, np.ndarray, pd.Series
 
         # Override split dates → 30-day test window chung
         config["split"] = {
-            "train_end": TEST_START,
+            "train_end": (pd.Timestamp(TEST_START) - pd.Timedelta(days=1)).strftime("%Y-%m-%d"),
             "test_start": TEST_START,
             "test_end": TEST_END,
+            "panel_lookback_days": 90,
         }
 
         # Load + prepare data
         df, _ = load_raw_data(config)
         df = filter_stores(df, config)
-        df = add_all_features(df, feature_cfg=config.get("features", {}))
+        df = prepare_holdout_panel(df, config)
+        df = add_all_features(df, feature_cfg=config.get("features", {}),
+                              train_end=config["split"]["train_end"])
         if config.get("use_log_sales", False):
             df = apply_log_transform(df)
 
@@ -228,7 +231,7 @@ def load_and_predict(model_name: str) -> tuple[np.ndarray, np.ndarray, pd.Series
             y_true = np.expm1(y_true)
 
         dates = test_df["date"]
-        return y_true, preds, dates
+        return y_true, preds, dates, weights_from_frame(test_df)
 
     except Exception as e:
         print(f"  [ERROR] {model_name}: {e}")
@@ -349,10 +352,10 @@ def main():
         print(f"  Loading {display}...")
         result = load_and_predict(model_name)
         if result is not None:
-            y_true, y_pred, dates = result
+            y_true, y_pred, dates, weights = result
             actual_agg, pred_agg, agg_dates = aggregate_by_date(y_true, y_pred, dates)
             predictions[display] = (actual_agg, pred_agg, agg_dates)
-            metrics = evaluate_all(y_true, y_pred)
+            metrics = evaluate_all(y_true, y_pred, weights)
             print(f"    ✓ {display}: NWRMSLE={metrics['nwrmsle']:.4f}, MAE={metrics['mae']:.1f}, RMSE={metrics['rmse']:.1f}")
 
     # 4. Charts

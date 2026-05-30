@@ -84,7 +84,8 @@ def main():
     # === LOAD DATA ===
     df, _ = load_raw_data(config)
     df = filter_stores(df, config)
-    df = add_all_features(df)
+    df = add_all_features(df, feature_cfg=config.get("features", {}),
+                          train_end=config.get("split", {}).get("train_end"))
     train_df, val_df, _, _ = preprocess(df, config)
     print(f"Data: {len(train_df)} train, {len(val_df)} val rows")
 

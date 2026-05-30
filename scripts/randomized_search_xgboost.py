@@ -74,6 +74,14 @@ def randomized_search(
         n_iter: Number of random combinations to try (default: auto-determined)
         max_stores: Limit number of stores for faster testing (default: None)
     """
+    typer.echo(
+        "randomized_search_xgboost.py đã tắt: sklearn TimeSeriesSplit trên panel "
+        "store-item không tạo rolling-origin folds đúng. Dùng grid_search_xgboost.py "
+        "và `python scripts/evaluate.py --model xgboost --cv expanding`.",
+        err=True,
+    )
+    raise typer.Exit(1)
+
     typer.echo("=== RandomizedSearchCV for XGBoost ===")
 
     # Load configuration and data

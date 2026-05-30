@@ -23,7 +23,7 @@ import yaml
 from src.data.features import add_all_features
 from src.data.loader import filter_stores, load_raw_data
 from src.data.preprocessor import preprocess
-from src.evaluation.metrics import evaluate_all
+from src.evaluation.metrics import evaluate_all, weights_from_frame
 from src.models.sarimax import SARIMAXModel
 from src.tuning.tuning_viz import plot_ablation_results
 from src.utils.config import load_config
@@ -88,7 +88,8 @@ def ablation(
     typer.echo("Loading data...")
     df, _ = load_raw_data(config)
     df = filter_stores(df, config)
-    df = add_all_features(df)
+    df = add_all_features(df, feature_cfg=config.get("features", {}),
+                          train_end=config.get("split", {}).get("train_end"))
     train_df, val_df, _, _ = preprocess(df, config)
     typer.echo(f"Data: {len(train_df)} train, {len(val_df)} val rows")
 
@@ -111,7 +112,7 @@ def ablation(
 
                 predictions = model.predict(val_df)
                 y_true = val_df["unit_sales"].values
-                metrics = evaluate_all(y_true, predictions)
+                metrics = evaluate_all(y_true, predictions, weights_from_frame(val_df))
 
                 row = {
                     "experiment": exp_name,

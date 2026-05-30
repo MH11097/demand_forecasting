@@ -10,9 +10,9 @@ import typer
 import numpy as np
 
 from src.data.features import add_all_features
-from src.data.loader import load_cleaned_data, load_raw_data
+from src.data.loader import load_cleaned_data, load_raw_data, prepare_holdout_panel
 from src.data.preprocessor import preprocess
-from src.evaluation.metrics import evaluate_all
+from src.evaluation.metrics import evaluate_all, weights_from_frame
 from src.models import get_model_class
 from src.utils.config import load_config
 from src.utils.seed import set_seed
@@ -82,7 +82,7 @@ def _train_and_evaluate(
     # Evaluate trên test_df riêng biệt
     predictions = model.predict(test_df)
     y_true = test_df["unit_sales"].values
-    metrics = evaluate_all(y_true, predictions)
+    metrics = evaluate_all(y_true, predictions, weights_from_frame(test_df))
 
     return {
         "n_features": len(feature_cols),
@@ -120,10 +120,15 @@ def run(
         df, _ = load_cleaned_data(config)
     else:
         df, _ = load_raw_data(config)
+    df = prepare_holdout_panel(df, config)
 
     # Add all features
     typer.echo("Adding features...")
-    df = add_all_features(df)
+    df = add_all_features(
+        df,
+        feature_cfg=config.get("features", {}),
+        train_end=config.get("split", {}).get("train_end"),
+    )
 
     # Preprocess
     typer.echo("Preprocessing...")

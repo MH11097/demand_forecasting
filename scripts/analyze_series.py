@@ -40,7 +40,8 @@ def _load_train_series(model_name: str, n_stores: int) -> dict[int, np.ndarray]:
     else:
         df, _ = load_raw_data(config)
     df = filter_stores(df, config)
-    df = add_all_features(df)
+    df = add_all_features(df, feature_cfg=config.get("features", {}),
+                          train_end=config.get("split", {}).get("train_end"))
 
     # chỉ lấy phần train → phân tích trên dữ liệu mà model sẽ thấy khi fit
     train_end = config["split"]["train_end"]

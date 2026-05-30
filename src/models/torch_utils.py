@@ -14,19 +14,36 @@ _EXCLUDE_FROM_FEATURES = {
     "id", "cluster", "class",   # ID / categorical thô — không dùng làm feature liên tục
     "store_idx", "item_idx",    # embedding index — xử lý riêng
     "date",
+    "was_return", "returned_units",  # EDA-only, dẫn xuất từ target cùng ngày
 }
 
 
-def _select_feature_cols(df) -> list[str]:
+def _select_feature_cols(df, config: dict | None = None) -> list[str]:
     """Chọn cột feature liên tục: tất cả numeric ngoài ID/target/date."""
-    import pandas as pd
-    return [
+    cols = [
         c for c in df.select_dtypes(include=[np.number]).columns
         if c not in _EXCLUDE_FROM_FEATURES
     ]
+    feature_cfg = (config or {}).get("features", {})
+    if not feature_cfg.get("use_promo", True):
+        cols = [
+            c for c in cols
+            if c != "onpromotion" and not c.startswith("promo_")
+            and c not in {"days_since_last_promo", "days_until_next_promo"}
+        ]
+    if not feature_cfg.get("use_oil", True):
+        cols = [c for c in cols if c not in {"dcoilwtico", "oil_lag_7"}]
+    if not feature_cfg.get("use_holiday", True):
+        cols = [c for c in cols if "holiday" not in c and "event" not in c]
+    if not feature_cfg.get("use_perishable", True):
+        cols = [c for c in cols if c != "perishable"]
+    return cols
 
 
-def prepare_sequences(df, feature_cols=None, target_col: str = "unit_sales", log_target: bool = False):
+def prepare_sequences(
+    df, feature_cols=None, target_col: str = "unit_sales", log_target: bool = False,
+    config: dict | None = None,
+):
     """Chuẩn bị feature matrix và target từ DataFrame.
 
     Args:
@@ -39,7 +56,7 @@ def prepare_sequences(df, feature_cols=None, target_col: str = "unit_sales", log
         (features: np.float32, targets: np.float32, feature_cols: list[str])
     """
     if feature_cols is None:
-        feature_cols = _select_feature_cols(df)
+        feature_cols = _select_feature_cols(df, config=config)
     features = df[feature_cols].fillna(0).values.astype(np.float32)
     targets = df[target_col].values.astype(np.float32)
     return features, targets, feature_cols
