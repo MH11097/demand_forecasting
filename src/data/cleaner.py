@@ -15,14 +15,17 @@ onpromotion NaN→0 → lọc 1 nhóm store (store_filter) → sort.
 Functional style: mỗi hàm nhận/trả DataFrame. build_dataset() là điểm vào tổng.
 """
 
+import json
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
-# Các loại sự kiện trong holidays_events.csv được coi là NGÀY NGHỈ thực sự.
-# "Work Day" là ngày làm bù (KHÔNG nghỉ) -> loại; "Transfer" là ngày lễ dời tới.
-_HOLIDAY_TYPES = {"Holiday", "Additional", "Bridge", "Transfer", "Event"}
+# Event có thể làm thay đổi cầu nhưng không đồng nghĩa với ngày nghỉ. Giữ cờ riêng để
+# model phân biệt World Cup, Black Friday, động đất... với holiday thực sự.
+_HOLIDAY_TYPES = {"Holiday", "Additional", "Bridge", "Transfer"}
+_EVENT_TYPES = {"Event"}
+CACHE_SCHEMA_VERSION = 2
 
 
 # ----------------------------------------------------------------------------
@@ -98,7 +101,7 @@ def merge_oil(df: pd.DataFrame, oil: pd.DataFrame | None) -> pd.DataFrame:
 
 
 def merge_holidays(df: pd.DataFrame, holidays: pd.DataFrame | None) -> pd.DataFrame:
-    """Tạo cờ is_holiday (+ national/regional/local) theo locale.
+    """Tạo cờ holiday và event riêng biệt theo locale.
 
     - National: áp dụng cho mọi store.
     - Regional: khớp theo state của store (locale_name == state).
@@ -107,33 +110,35 @@ def merge_holidays(df: pd.DataFrame, holidays: pd.DataFrame | None) -> pd.DataFr
     """
     if holidays is None:
         return df
+    df = df.copy()
     h = holidays.copy()
-    h = h[h["type"].isin(_HOLIDAY_TYPES)]
     h = h[~h["transferred"].fillna(False).astype(bool)]
 
-    nat = set(map(pd.Timestamp, h.loc[h["locale"] == "National", "date"].unique()))
-    reg = h.loc[h["locale"] == "Regional", ["date", "locale_name"]].drop_duplicates()
-    loc = h.loc[h["locale"] == "Local", ["date", "locale_name"]].drop_duplicates()
-    reg_set = set(zip(reg["date"], reg["locale_name"]))
-    loc_set = set(zip(loc["date"], loc["locale_name"]))
+    def _add_locale_flags(frame: pd.DataFrame, events: pd.DataFrame, prefix: str) -> pd.DataFrame:
+        nat = set(map(pd.Timestamp, events.loc[events["locale"] == "National", "date"].unique()))
+        reg = events.loc[events["locale"] == "Regional", ["date", "locale_name"]].drop_duplicates()
+        loc = events.loc[events["locale"] == "Local", ["date", "locale_name"]].drop_duplicates()
+        reg_set = set(zip(reg["date"], reg["locale_name"]))
+        loc_set = set(zip(loc["date"], loc["locale_name"]))
 
-    df = df.copy()
-    df["holiday_national"] = df["date"].isin(nat).astype(int)
-    if "state" in df.columns:
-        df["holiday_regional"] = [
-            int((d, s) in reg_set) for d, s in zip(df["date"], df["state"])
-        ]
-    else:
-        df["holiday_regional"] = 0
-    if "city" in df.columns:
-        df["holiday_local"] = [
-            int((d, c) in loc_set) for d, c in zip(df["date"], df["city"])
-        ]
-    else:
-        df["holiday_local"] = 0
-    df["is_holiday"] = (
-        df["holiday_national"] | df["holiday_regional"] | df["holiday_local"]
-    ).astype(int)
+        frame[f"{prefix}_national"] = frame["date"].isin(nat).astype(int)
+        frame[f"{prefix}_regional"] = (
+            [int((d, s) in reg_set) for d, s in zip(frame["date"], frame["state"])]
+            if "state" in frame.columns else 0
+        )
+        frame[f"{prefix}_local"] = (
+            [int((d, c) in loc_set) for d, c in zip(frame["date"], frame["city"])]
+            if "city" in frame.columns else 0
+        )
+        frame[f"is_{prefix}"] = (
+            frame[f"{prefix}_national"]
+            | frame[f"{prefix}_regional"]
+            | frame[f"{prefix}_local"]
+        ).astype(int)
+        return frame
+
+    df = _add_locale_flags(df, h[h["type"].isin(_HOLIDAY_TYPES)], "holiday")
+    df = _add_locale_flags(df, h[h["type"].isin(_EVENT_TYPES)], "event")
     return df
 
 
@@ -150,9 +155,11 @@ def merge_transactions(df: pd.DataFrame, transactions: pd.DataFrame | None,
 # Clean
 # ----------------------------------------------------------------------------
 def clip_negative_sales(df: pd.DataFrame) -> pd.DataFrame:
-    """unit_sales âm = trả hàng -> clip 0 (khớp công thức NWRMSLE dùng log1p(clip(.,0)))."""
+    """Clip returns for target metric, but retain EDA-only return indicators."""
     df = df.copy()
     if "unit_sales" in df.columns:
+        df["was_return"] = (df["unit_sales"] < 0).astype(int)
+        df["returned_units"] = (-df["unit_sales"].clip(upper=0)).astype(float)
         df["unit_sales"] = df["unit_sales"].clip(lower=0)
     return df
 
@@ -259,8 +266,11 @@ def build_dataset(config: dict) -> pd.DataFrame:
     # zero-fill ngày thiếu (implicit zeros) TRƯỚC khi merge exog theo ngày & build lag/rolling
     if config.get("clean", {}).get("zero_fill", True):
         df = reindex_fill_dates(df)
-    df = merge_oil(df, tables["oil"])
-    df = merge_holidays(df, tables["holidays"])
+    exog = config.get("exog", {})
+    if exog.get("use_oil", True):
+        df = merge_oil(df, tables["oil"])
+    if exog.get("use_holidays", True):
+        df = merge_holidays(df, tables["holidays"])
     df = merge_transactions(df, tables["transactions"], config)
     df = clip_negative_sales(df)
     df = fill_onpromotion(df)
@@ -302,7 +312,25 @@ def validate(df: pd.DataFrame) -> dict:
     return report
 
 
-def save(df: pd.DataFrame, path: str, fmt: str = "csv") -> None:
+def cache_signature(config: dict) -> dict:
+    """Config subset that changes the expensive cleaned cache."""
+    return {
+        "cache_schema_version": CACHE_SCHEMA_VERSION,
+        "store_filter": config.get("store_filter"),
+        "clean": config.get("clean", {}),
+        "exog": {
+            key: config.get("exog", {}).get(key, default)
+            for key, default in (
+                ("use_oil", True),
+                ("use_holidays", True),
+                ("use_transactions", False),
+            )
+        },
+        "files": config.get("data", {}).get("files", {}),
+    }
+
+
+def save(df: pd.DataFrame, path: str, fmt: str = "csv", config: dict | None = None) -> None:
     """Lưu DataFrame ra csv hoặc feather (feather nén zstd để chia sẻ qua git < 100MB)."""
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -313,4 +341,7 @@ def save(df: pd.DataFrame, path: str, fmt: str = "csv") -> None:
         )
     else:
         df.to_csv(f"{out}.csv", index=False)
+    if config is not None:
+        with open(f"{out}.manifest.json", "w", encoding="utf-8") as f:
+            json.dump({"cache_signature": cache_signature(config)}, f, indent=2, sort_keys=True)
     print(f"Saved {out}.{fmt} ({len(df):,} rows)")

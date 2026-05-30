@@ -40,6 +40,11 @@ def test_overrides_store_filter():
     assert config["store_filter"]["value"] == [5]
 
 
+def test_disabled_exog_disables_model_feature_group():
+    config = load_config(overrides={"exog.use_oil": False})
+    assert config["features"]["use_oil"] is False
+
+
 def test_make_param_slug_arima():
     config = {"model": {"name": "arima", "order": [1, 1, 1]}}
     assert make_param_slug(config) == "order_1-1-1"

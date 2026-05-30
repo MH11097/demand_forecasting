@@ -37,7 +37,7 @@ features:
 
   # --- Nhóm 5b: Payday (lương Ecuador 15 & cuối tháng) + Zero-sales counts ---
   # payday:     is_payday, days_since_payday, days_to_payday (cầu tăng hậu lương)
-  # zero_sales: zero_sales_last_28 (đếm ngày bán 0 → proxy hết hàng/độ biến động)
+  # zero_sales: zero_sales_last_28 (đếm ngày ghi nhận bán 0; không suy diễn stockout)
   use_payday: true
   use_zero_sales: true
 
@@ -45,7 +45,7 @@ features:
   # promo:      onpromotion + promo_rolling_rate + promo_count_7/14/30
   #             + days_since_last_promo + days_until_next_promo (onpromotion biết trước)
   # oil:        dcoilwtico (nội suy) + oil_lag_7
-  # holiday:    is_holiday + cờ theo type/locale (national/regional/local)
+  # holiday:    is_holiday/is_event + cờ theo locale (national/regional/local)
   # perishable: perishable (cờ hàng dễ hỏng, đồng thời là trọng số NWRMSLE)
   use_promo: true
   use_oil: true

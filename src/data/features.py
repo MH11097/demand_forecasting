@@ -59,28 +59,48 @@ def fourier_cols(specs: list | None = None) -> list[str]:
     return cols
 
 
-def add_lag_features(df: pd.DataFrame, lags: list[int] | None = None) -> pd.DataFrame:
-    """Lag unit_sales theo từng chuỗi (store_nbr, item_nbr)."""
+def _target_history(df: pd.DataFrame, train_end=None) -> pd.Series:
+    """Target history available at forecast origin.
+
+    Rows after ``train_end`` keep their labels in the dataframe for evaluation, but
+    must not feed target-derived features. This produces a conservative direct
+    multi-step baseline: unavailable future lags become missing and are filled with 0.
+    """
+    history = df[TARGET].copy()
+    if train_end is not None:
+        history = history.mask(df["date"] > pd.Timestamp(train_end))
+    return history
+
+
+def add_lag_features(
+    df: pd.DataFrame, lags: list[int] | None = None, train_end=None
+) -> pd.DataFrame:
+    """Lag unit_sales theo từng chuỗi, chỉ dùng lịch sử biết tại forecast origin."""
     if lags is None:
         # 1,7 ngắn hạn; 14,30 trung hạn; 60,90 dài hạn (khớp horizon 90 ngày)
         lags = [1, 7, 14, 30, 60, 90]
     df = df.copy()
+    history = _target_history(df, train_end)
     for lag in lags:
-        df[f"{TARGET}_lag_{lag}"] = df.groupby(GROUP)[TARGET].shift(lag)
+        df[f"{TARGET}_lag_{lag}"] = history.groupby(df[GROUP]).shift(lag)
     return df
 
 
 def add_rolling_features(
-    df: pd.DataFrame, windows: list[int] | None = None, stats: list[str] | None = None
+    df: pd.DataFrame,
+    windows: list[int] | None = None,
+    stats: list[str] | None = None,
+    train_end=None,
 ) -> pd.DataFrame:
-    """Rolling mean/std/median của unit_sales theo từng chuỗi."""
+    """Rolling mean/std/median của unit_sales từ lịch sử biết tại forecast origin."""
     if windows is None:
         windows = [7, 14, 30]
     if stats is None:
         stats = ["mean", "std", "median"]
     df = df.copy()
+    history = _target_history(df, train_end)
     for w in windows:
-        grouped = df.groupby(GROUP)[TARGET]
+        grouped = history.groupby(df[GROUP])
         # shift(1) trước rolling -> tránh leakage (không dùng giá trị hôm nay)
         if "mean" in stats:
             df[f"{TARGET}_rolling_mean_{w}"]   = grouped.transform(lambda x: x.shift(1).rolling(w, min_periods=1).mean())
@@ -99,33 +119,38 @@ def add_group_mean_features(df: pd.DataFrame, train_end=None) -> pd.DataFrame:
     - family_avg: mức bán trung bình theo nhóm hàng (family, từ items.csv) — bắt mùa vụ
       cấp nhóm, giảm nhiễu cho item bán thưa (theo top solution Favorita).
 
-    ⚠ CHỐNG LEAKAGE: thống kê CHỈ tính trên phần train (`date <= train_end`) rồi merge sang
-    MỌI dòng (train/val/test). Nếu `train_end=None` → tính trên toàn df (chỉ dùng khi không
-    có split, vd phân tích EDA). series_dow_avg đặc biệt nhạy: nếu tính cả test thì 1 ngày
-    test sẽ "thấy" doanh số các ngày cùng thứ khác trong test → gần như lộ đáp án.
+    CHỐNG LEAKAGE:
+    - thống kê chỉ fit trên phần train (`date <= train_end`) rồi freeze cho val/test;
+    - dòng train dùng leave-one-out mean để target của chính dòng không đi vào feature.
+    Nếu `train_end=None`, tính mean trên toàn df chỉ để phục vụ EDA.
     """
     df = df.copy()
     src = df[df["date"] <= pd.Timestamp(train_end)] if train_end is not None else df
 
-    series_dow = (
-        src.groupby([GROUP, "dayofweek"])[TARGET].mean().rename("series_dow_avg").reset_index()
-    )
-    df = df.merge(series_dow, on=[GROUP, "dayofweek"], how="left")
+    def _merge_mean(frame: pd.DataFrame, keys: list[str], name: str) -> pd.DataFrame:
+        sum_col, count_col = f"__{name}_sum", f"__{name}_count"
+        stats = (
+            src.groupby(keys)[TARGET]
+            .agg(**{sum_col: "sum", count_col: "count"})
+            .reset_index()
+        )
+        frame = frame.merge(stats, on=keys, how="left")
+        encoded = frame[sum_col] / frame[count_col]
+        if train_end is not None:
+            train_mask = frame["date"] <= pd.Timestamp(train_end)
+            loo_count = frame[count_col] - 1
+            loo = (frame[sum_col] - frame[TARGET]) / loo_count
+            encoded = encoded.mask(train_mask & (loo_count > 0), loo)
+            encoded = encoded.mask(train_mask & (loo_count <= 0))
+        frame[name] = encoded.fillna(0)
+        return frame.drop(columns=[sum_col, count_col])
 
-    store_avg = src.groupby("store_nbr")[TARGET].mean().rename("store_avg").reset_index()
-    df = df.merge(store_avg, on="store_nbr", how="left")
+    df = _merge_mean(df, [GROUP, "dayofweek"], "series_dow_avg")
+    df = _merge_mean(df, ["store_nbr"], "store_avg")
+    df = _merge_mean(df, ["item_nbr"], "item_avg")
 
-    item_avg = src.groupby("item_nbr")[TARGET].mean().rename("item_avg").reset_index()
-    df = df.merge(item_avg, on="item_nbr", how="left")
-
-    fill_cols = ["series_dow_avg", "store_avg", "item_avg"]
     if "family" in df.columns:
-        family_avg = src.groupby("family")[TARGET].mean().rename("family_avg").reset_index()
-        df = df.merge(family_avg, on="family", how="left")
-        fill_cols.append("family_avg")
-
-    for c in fill_cols:
-        df[c] = df[c].fillna(0)
+        df = _merge_mean(df, ["family"], "family_avg")
     return df
 
 
@@ -205,13 +230,15 @@ def add_promo_timing_features(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def add_zero_sales_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Đếm ngày bán = 0 trong 28 ngày gần nhất (proxy hết hàng/độ biến động cầu).
+def add_zero_sales_features(df: pd.DataFrame, train_end=None) -> pd.DataFrame:
+    """Đếm ngày ghi nhận bán = 0 trong 28 ngày gần nhất.
 
-    Tính trên unit_sales GỐC (trước log-transform). shift(1) → chỉ dùng quá khứ.
+    Dataset không có tồn kho nên feature này không chứng minh stockout. Tính trên
+    unit_sales gốc và chỉ dùng lịch sử biết tại forecast origin.
     """
     df = df.copy()
-    is_zero = (df[TARGET] <= 0).astype(int)
+    history = _target_history(df, train_end)
+    is_zero = (history <= 0).astype(int)
     df["zero_sales_last_28"] = (
         is_zero.groupby(df[GROUP]).transform(lambda x: x.shift(1).rolling(28, min_periods=1).sum())
     ).fillna(0)
@@ -229,9 +256,12 @@ def add_oil_features(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def add_holiday_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Đảm bảo cờ holiday tồn tại (đã tạo ở cleaner.merge_holidays); fill 0 nếu thiếu."""
+    """Đảm bảo cờ holiday/event tồn tại; fill 0 nếu thiếu."""
     df = df.copy()
-    for c in ["is_holiday", "holiday_national", "holiday_regional", "holiday_local"]:
+    for c in [
+        "is_holiday", "holiday_national", "holiday_regional", "holiday_local",
+        "is_event", "event_national", "event_regional", "event_local",
+    ]:
         if c not in df.columns:
             df[c] = 0
         df[c] = df[c].fillna(0).astype(int)
@@ -251,7 +281,8 @@ def add_all_features(df: pd.DataFrame, feature_cfg: dict | None = None, train_en
     """Áp dụng các bước feature engineering, điều khiển bởi feature_cfg (configs/features.yaml).
 
     Nếu None → bật tất cả với default (nhóm exog chỉ thêm khi cột nguồn có mặt).
-    `train_end`: ngày cuối train → group-mean encodings chỉ tính trên train (chống leakage).
+    `train_end`: forecast origin. Mọi feature dẫn xuất từ target chỉ dùng lịch sử tới
+    ngày này; group means fit train-only và leave-one-out trên các dòng train.
     """
     cfg = feature_cfg or {}
 
@@ -260,17 +291,20 @@ def add_all_features(df: pd.DataFrame, feature_cfg: dict | None = None, train_en
     if cfg.get("use_fourier", True):
         df = add_fourier_features(df)
     if cfg.get("use_lag", True):
-        df = add_lag_features(df, lags=cfg.get("lag_windows") or None)
+        df = add_lag_features(df, lags=cfg.get("lag_windows") or None, train_end=train_end)
     if cfg.get("use_rolling", True):
         df = add_rolling_features(
-            df, windows=cfg.get("rolling_windows") or None, stats=cfg.get("rolling_stats") or ["mean", "std", "median"]
+            df,
+            windows=cfg.get("rolling_windows") or None,
+            stats=cfg.get("rolling_stats") or ["mean", "std", "median"],
+            train_end=train_end,
         )
     if cfg.get("use_group_mean", True):
         df = add_group_mean_features(df, train_end=train_end)
     if cfg.get("use_payday", True):
         df = add_payday_features(df)
     if cfg.get("use_zero_sales", True):
-        df = add_zero_sales_features(df)
+        df = add_zero_sales_features(df, train_end=train_end)
 
     # --- Exog Favorita ---
     if cfg.get("use_promo", True):

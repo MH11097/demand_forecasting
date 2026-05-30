@@ -37,7 +37,7 @@ def main():
         print("\n--- Quality report ---")
         validate(df)
 
-    save(df, f"{args.out_dir}/train_cleaned", args.format)
+    save(df, f"{args.out_dir}/train_cleaned", args.format, config=config)
     print("Done.")
 
 

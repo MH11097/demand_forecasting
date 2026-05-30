@@ -3,8 +3,11 @@
 Dùng fixture tổng hợp nhỏ hình dạng Favorita (multi-file) — không cần tải dữ liệu thật.
 """
 
+import json
+
 import numpy as np
 import pandas as pd
+import pytest
 
 from src.data import cleaner, features, loader, preprocessor
 
@@ -57,12 +60,12 @@ def _oil():
 
 def _holidays():
     return pd.DataFrame({
-        "date": pd.to_datetime(["2017-01-02", "2017-01-03", "2017-01-04"]),
-        "type": ["Holiday", "Holiday", "Holiday"],
-        "locale": ["National", "Regional", "National"],
-        "locale_name": ["Ecuador", "Pichincha", "Ecuador"],
-        "description": ["a", "b", "c"],
-        "transferred": [False, False, True],   # 2017-01-04 transferred -> KHÔNG nghỉ
+        "date": pd.to_datetime(["2017-01-01", "2017-01-02", "2017-01-03", "2017-01-04"]),
+        "type": ["Event", "Holiday", "Holiday", "Holiday"],
+        "locale": ["National", "National", "Regional", "National"],
+        "locale_name": ["Ecuador", "Ecuador", "Pichincha", "Ecuador"],
+        "description": ["event", "a", "b", "c"],
+        "transferred": [False, False, False, True],   # 2017-01-04 transferred -> KHÔNG nghỉ
     })
 
 
@@ -78,6 +81,8 @@ def test_join_metadata():
 def test_clip_negative_sales():
     df = cleaner.clip_negative_sales(_train())
     assert df["unit_sales"].min() >= 0
+    assert df.loc[0, "was_return"] == 1
+    assert df.loc[0, "returned_units"] == 3.0
 
 
 def test_fill_onpromotion():
@@ -112,6 +117,10 @@ def test_merge_holidays_locale_and_transferred():
     assert not reg.loc[reg["store_nbr"] == 2, "is_holiday"].any()
     # 2017-01-04 transferred -> KHÔNG nghỉ
     assert not df.loc[df["date"] == "2017-01-04", "is_holiday"].any()
+    # Event có tín hiệu riêng, không bị đánh đồng thành ngày nghỉ
+    event = df[df["date"] == "2017-01-01"]
+    assert event["is_event"].all()
+    assert not event["is_holiday"].any()
 
 
 def test_build_dataset(tmp_path):
@@ -152,6 +161,39 @@ def test_select_series_samples():
     assert out["series_id"].nunique() == 2
 
 
+def test_load_cleaned_data_rejects_cache_without_manifest(tmp_path):
+    cleaned = tmp_path / "cleaned"
+    cleaned.mkdir()
+    _train().to_csv(cleaned / "train_cleaned.csv", index=False)
+    config = {"data": {"cleaned_dir": str(cleaned)}, "store_filter": None}
+    with pytest.raises(ValueError, match="Legacy cache"):
+        loader.load_cleaned_data(config)
+
+
+def test_load_cleaned_data_rejects_manifest_config_mismatch(tmp_path):
+    cleaned = tmp_path / "cleaned"
+    cleaned.mkdir()
+    _train().to_csv(cleaned / "train_cleaned.csv", index=False)
+    cached_config = {"data": {"cleaned_dir": str(cleaned)}, "store_filter": None}
+    with open(cleaned / "train_cleaned.manifest.json", "w") as f:
+        json.dump({"cache_signature": cleaner.cache_signature(cached_config)}, f)
+    requested = {
+        "data": {"cleaned_dir": str(cleaned)},
+        "store_filter": {"by": "store_nbr", "value": [1]},
+    }
+    with pytest.raises(ValueError, match="config mismatch"):
+        loader.load_cleaned_data(requested)
+
+
+def test_save_cache_manifest_allows_reload(tmp_path):
+    cleaned = tmp_path / "cleaned"
+    config = {"data": {"cleaned_dir": str(cleaned)}, "store_filter": None}
+    cleaner.save(_train(), str(cleaned / "train_cleaned"), fmt="csv", config=config)
+    loaded, _ = loader.load_cleaned_data(config)
+    assert len(loaded) == len(_train())
+    assert "series_id" in loaded.columns
+
+
 def test_densify_fills_missing_dates():
     df = loader._add_series_id(_train().copy())
     df = df[df["date"] != "2017-01-02"]            # bỏ 1 ngày khỏi mọi chuỗi
@@ -159,6 +201,27 @@ def test_densify_fills_missing_dates():
     # mỗi chuỗi đủ 4 ngày trở lại, unit_sales ngày thêm = 0
     assert (dens.groupby("series_id")["date"].nunique() == 4).all()
     assert dens.loc[dens["date"] == "2017-01-02", "unit_sales"].eq(0).all()
+
+
+def test_build_forecast_panel_is_fixed_and_origin_safe():
+    df = loader._add_series_id(_train().copy())
+    # Entity này chỉ xuất hiện trong tương lai, không được dùng để suy ra pseudo-test panel.
+    cold_start = pd.DataFrame([{
+        "id": 99, "date": pd.Timestamp("2017-01-04"), "store_nbr": 1,
+        "item_nbr": 30, "unit_sales": 7.0, "onpromotion": 0,
+    }])
+    df = pd.concat([df, cold_start], ignore_index=True)
+    df = loader._add_series_id(df)
+    out = loader.build_forecast_panel(
+        df,
+        train_end="2017-01-02",
+        forecast_start="2017-01-03",
+        forecast_end="2017-01-04",
+        lookback_days=30,
+    )
+    panel = out[out["date"] >= "2017-01-03"]
+    assert panel.groupby("date").size().nunique() == 1
+    assert 30 not in panel["item_nbr"].unique()
 
 
 # ---------------------------------------------------------------------------
@@ -177,6 +240,35 @@ def test_add_lag_features_naming():
     df = features.add_lag_features(_featured())
     assert "unit_sales_lag_1" in df.columns
     assert "sales_lag_1" not in df.columns       # tên cũ phải biến mất
+
+
+def test_target_features_do_not_read_actuals_after_origin():
+    df = _featured()
+    out = features.add_all_features(
+        df,
+        feature_cfg={
+            "use_time": False, "use_fourier": False, "use_lag": True,
+            "lag_windows": [1], "use_rolling": False, "use_group_mean": False,
+            "use_payday": False, "use_zero_sales": False, "use_promo": False,
+            "use_oil": False, "use_holiday": False, "use_perishable": False,
+        },
+        train_end="2017-01-02",
+    )
+    series = out[out["series_id"] == 0].sort_values("date")
+    # 2017-01-03 được dùng lag của ngày cuối train; 2017-01-04 không được dùng actual 03/01.
+    assert series.loc[series["date"] == "2017-01-03", "unit_sales_lag_1"].iloc[0] == 5.0
+    assert series.loc[series["date"] == "2017-01-04", "unit_sales_lag_1"].iloc[0] == 0.0
+
+
+def test_group_mean_is_leave_one_out_in_train_and_frozen_after_origin():
+    df = _featured()
+    out = features.add_time_features(df)
+    out = features.add_group_mean_features(out, train_end="2017-01-02")
+    row_train = out[(out["store_nbr"] == 1) & (out["item_nbr"] == 10) & (out["date"] == "2017-01-01")].iloc[0]
+    row_test = out[(out["store_nbr"] == 1) & (out["item_nbr"] == 10) & (out["date"] == "2017-01-03")].iloc[0]
+    # store 1 train labels: clipped fixture is applied in _featured -> [0,5,5,5].
+    assert np.isclose(row_train["store_avg"], 5.0)
+    assert np.isclose(row_test["store_avg"], 3.75)
 
 
 def test_apply_log_transform_clips_and_logs():

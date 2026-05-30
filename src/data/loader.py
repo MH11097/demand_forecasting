@@ -5,6 +5,7 @@ load + join + clean nằm ở cleaner.build_dataset(); module này lo series_id 
 densify (tuỳ chọn) và chọn mẫu chuỗi cho per-series models. Entity = (store_nbr, item_nbr).
 """
 
+import json
 from pathlib import Path
 
 import numpy as np
@@ -13,6 +14,7 @@ import pandas as pd
 from src.data import cleaner
 
 TARGET = "unit_sales"
+_ENTITY = ["store_nbr", "item_nbr"]
 
 
 def _add_series_id(df: pd.DataFrame) -> pd.DataFrame:
@@ -23,6 +25,134 @@ def _add_series_id(df: pd.DataFrame) -> pd.DataFrame:
     """
     df["series_id"] = df.groupby(["store_nbr", "item_nbr"], sort=True).ngroup()
     return df
+
+
+def _fill_from_lookup(
+    frame: pd.DataFrame,
+    source: pd.DataFrame,
+    keys: list[str],
+    column: str,
+    agg: str = "first",
+) -> pd.DataFrame:
+    """Fill a panel column from a compact lookup without overwriting observed values."""
+    if column not in source.columns or not set(keys).issubset(source.columns):
+        return frame
+    lookup = (
+        source.dropna(subset=[column])
+        .groupby(keys, as_index=False)[column]
+        .agg(agg)
+        .rename(columns={column: f"__{column}_lookup"})
+    )
+    frame = frame.merge(lookup, on=keys, how="left")
+    if column not in frame.columns:
+        frame[column] = frame[f"__{column}_lookup"]
+    else:
+        frame[column] = frame[column].fillna(frame[f"__{column}_lookup"])
+    return frame.drop(columns=f"__{column}_lookup")
+
+
+def build_forecast_panel(
+    df: pd.DataFrame,
+    train_end,
+    forecast_start,
+    forecast_end,
+    lookback_days: int = 90,
+) -> pd.DataFrame:
+    """Build a fixed pseudo-holdout panel using information available at origin.
+
+    Favorita omits implicit-zero rows. For evaluation, every active entity must have
+    one row per forecast day, including days after its last observed sale. An entity
+    is active when it has an observed row during the configurable lookback window.
+    Entities first appearing after the origin are intentionally excluded: a local
+    pseudo-holdout has no official test panel that could reveal those cold starts.
+    """
+    required = set(_ENTITY + ["date", TARGET])
+    if not required.issubset(df.columns):
+        return df
+
+    train_end = pd.Timestamp(train_end)
+    forecast_start = pd.Timestamp(forecast_start)
+    forecast_end = pd.Timestamp(forecast_end)
+    if forecast_end < forecast_start:
+        raise ValueError("forecast_end must be on or after forecast_start")
+
+    origin = df[df["date"] <= train_end].copy()
+    if "is_imputed" in origin.columns:
+        observed = origin[origin["is_imputed"] == 0]
+    else:
+        observed = origin
+    recent_cutoff = train_end - pd.Timedelta(days=lookback_days)
+    last_seen = observed.groupby(_ENTITY)["date"].max()
+    active = last_seen[last_seen >= recent_cutoff].reset_index()[_ENTITY]
+    if active.empty:
+        raise ValueError("No active series at forecast origin; check split dates or lookback_days")
+
+    dates = pd.DataFrame({"date": pd.date_range(forecast_start, forecast_end, freq="D")})
+    grid = active.merge(dates, how="cross")
+    source_window = df[(df["date"] >= forecast_start) & (df["date"] <= forecast_end)]
+    panel = grid.merge(source_window, on=_ENTITY + ["date"], how="left", indicator=True)
+    inserted = panel["_merge"] == "left_only"
+    panel = panel.drop(columns="_merge")
+
+    static_cols = [
+        c for c in ["city", "state", "type", "cluster", "family", "class", "perishable"]
+        if c in origin.columns
+    ]
+    if static_cols:
+        static = origin.sort_values("date").groupby(_ENTITY, as_index=False)[static_cols].last()
+        panel = panel.merge(static, on=_ENTITY, how="left", suffixes=("", "__static"))
+        for col in static_cols:
+            static_col = f"{col}__static"
+            panel[col] = panel[col].fillna(panel[static_col])
+            panel = panel.drop(columns=static_col)
+
+    panel = _fill_from_lookup(panel, df, ["date"], "dcoilwtico")
+    panel = _fill_from_lookup(panel, df, ["date"], "holiday_national", agg="max")
+    panel = _fill_from_lookup(panel, df, ["date", "state"], "holiday_regional", agg="max")
+    panel = _fill_from_lookup(panel, df, ["date", "city"], "holiday_local", agg="max")
+    panel = _fill_from_lookup(panel, df, ["date"], "event_national", agg="max")
+    panel = _fill_from_lookup(panel, df, ["date", "state"], "event_regional", agg="max")
+    panel = _fill_from_lookup(panel, df, ["date", "city"], "event_local", agg="max")
+    panel = _fill_from_lookup(panel, df, ["date", "store_nbr"], "transactions")
+
+    for prefix in ("holiday", "event"):
+        parts = [f"{prefix}_{level}" for level in ("national", "regional", "local")]
+        if any(col in panel.columns for col in parts):
+            for col in parts:
+                if col not in panel.columns:
+                    panel[col] = 0
+                panel[col] = panel[col].fillna(0).astype(int)
+            panel[f"is_{prefix}"] = panel[parts].max(axis=1).astype(int)
+
+    panel[TARGET] = panel[TARGET].fillna(0.0)
+    if "onpromotion" in panel.columns:
+        panel["onpromotion"] = panel["onpromotion"].fillna(0).astype(int)
+    if "is_imputed" in panel.columns:
+        panel["is_imputed"] = panel["is_imputed"].fillna(inserted.astype(int)).astype(int)
+    else:
+        panel["is_imputed"] = inserted.astype(int)
+
+    history = df[df["date"] < forecast_start]
+    out = pd.concat([history, panel], ignore_index=True)
+    if "series_id" not in out.columns or out["series_id"].isna().any():
+        out = out.drop(columns=["series_id"], errors="ignore")
+        out = _add_series_id(out)
+    return out.sort_values(["series_id", "date"]).reset_index(drop=True)
+
+
+def prepare_holdout_panel(df: pd.DataFrame, config: dict) -> pd.DataFrame:
+    """Apply fixed-panel pseudo-holdout construction from split config."""
+    split = config.get("split", {})
+    required = ("train_end", "test_start", "test_end")
+    if not all(key in split for key in required):
+        return df
+    return build_forecast_panel(
+        df,
+        train_end=split["train_end"],
+        forecast_start=split["test_start"],
+        forecast_end=split["test_end"],
+        lookback_days=split.get("panel_lookback_days", 90),
+    )
 
 
 def _densify(df: pd.DataFrame, config: dict) -> pd.DataFrame:
@@ -83,6 +213,20 @@ def load_cleaned_data(config: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
     cleaned_dir = Path(config["data"]["cleaned_dir"])
     feather_path = cleaned_dir / "train_cleaned.feather"
     csv_path = cleaned_dir / "train_cleaned.csv"
+    manifest_path = cleaned_dir / "train_cleaned.manifest.json"
+    if (feather_path.exists() or csv_path.exists()) and not manifest_path.exists():
+        raise ValueError(
+            "Legacy cache has no manifest and may use stale cleaning semantics. "
+            "Rebuild once with `python scripts/clean_data.py`."
+        )
+    if manifest_path.exists():
+        with open(manifest_path, encoding="utf-8") as f:
+            cached_signature = json.load(f).get("cache_signature")
+        expected_signature = cleaner.cache_signature(config)
+        if cached_signature != expected_signature:
+            raise ValueError(
+                "Cached data config mismatch. Rebuild with `python scripts/clean_data.py`."
+            )
     if feather_path.exists():
         df = pd.read_feather(feather_path)
     elif csv_path.exists():

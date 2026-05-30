@@ -56,7 +56,7 @@ clean:
 # Bật/tắt từng nguồn exogenous (join trong cleaner, build feature trong features.py).
 exog:
   use_oil: true            # giá dầu (proxy kinh tế Ecuador), nội suy ngày thiếu
-  use_holidays: true       # lễ/sự kiện -> cờ boolean theo type/locale
+  use_holidays: true       # holiday và event -> cờ riêng theo locale
   use_onpromotion: true    # khuyến mãi theo (store_nbr, item_nbr, date)
   use_perishable: true     # cờ hàng dễ hỏng (trọng số NWRMSLE = 1.25)
   use_transactions: false  # ⚠ rò rỉ: chỉ có cho ngày train, thiếu ở horizon -> mặc định tắt
@@ -66,6 +66,9 @@ split:
   train_end: "2017-05-15"      # train toàn bộ đến ngày này
   test_start: "2017-05-16"     # test = ~92 ngày cuối (khớp horizon dự báo)
   test_end: "2017-08-15"
+  # Pseudo-holdout: fixed panel gồm series có ít nhất 1 dòng quan sát trong N ngày
+  # trước train_end. Không dùng series chỉ xuất hiện lần đầu trong tương lai.
+  panel_lookback_days: 90
 
 forecast_horizon: 90           # ngày dự báo (Kaggle test thực tế = 16; xem README)
 

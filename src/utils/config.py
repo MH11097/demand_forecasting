@@ -16,6 +16,27 @@ _SLUG_KEYS: dict[str, list[str]] = {
 
 CONFIGS_DIR = Path(__file__).resolve().parents[2] / "configs"
 
+_EXOG_FEATURE_FLAGS = {
+    "use_oil": "use_oil",
+    "use_holidays": "use_holiday",
+    "use_onpromotion": "use_promo",
+    "use_perishable": "use_perishable",
+}
+
+
+def _apply_exog_feature_flags(config: dict) -> dict:
+    """Make exog.* authoritative when a source is disabled.
+
+    The cleaner may retain columns needed for evaluation (notably ``perishable``),
+    so model-facing feature flags must also be disabled explicitly.
+    """
+    exog = config.get("exog", {})
+    features = config.setdefault("features", {})
+    for exog_key, feature_key in _EXOG_FEATURE_FLAGS.items():
+        if not exog.get(exog_key, True):
+            features[feature_key] = False
+    return config
+
 
 def _deep_merge(base: dict, override: dict) -> dict:
     """Deep merge override into base dict. Override values take priority."""
@@ -61,7 +82,7 @@ def load_config(model_name: str | None = None, overrides: dict | None = None) ->
         for key, value in overrides.items():
             _set_nested(config, key, value)
 
-    return config
+    return _apply_exog_feature_flags(config)
 
 
 def _format_slug_value(value) -> str:
