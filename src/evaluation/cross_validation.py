@@ -1,7 +1,7 @@
 """Walk-forward cross-validation for time series models (Favorita schema).
 
-Dùng cột chuẩn: date, unit_sales, series_id. Mỗi fold fit scaler riêng trên train
-(RobustScaler) để tránh leakage. Metric chính: NWRMSLE (trọng số perishable).
+Dữ liệu đầu vào là cleaned panel trước feature engineering. Mỗi fold dựng fixed
+forecast panel, fit target-derived features tại origin và fit scaler riêng trên train.
 """
 
 import time
@@ -10,6 +10,8 @@ import numpy as np
 import pandas as pd
 from sklearn.preprocessing import RobustScaler
 
+from src.data.features import add_all_features, apply_log_transform
+from src.data.loader import build_forecast_panel
 from src.data.preprocessor import _get_numeric_feature_cols
 from src.evaluation.metrics import evaluate_all, perishable_weights
 
@@ -39,6 +41,40 @@ def _scale_per_fold(train_df: pd.DataFrame, test_df: pd.DataFrame, config: dict)
     return train_df, test_df
 
 
+def _prepare_fold(
+    df: pd.DataFrame,
+    config: dict,
+    train_dates: list,
+    test_dates: list,
+    eval_days: int | None,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Build fold-local panel and origin-safe features."""
+    origin = pd.Timestamp(max(train_dates))
+    first_test = pd.Timestamp(min(test_dates))
+    last_test = pd.Timestamp(max(test_dates))
+    fold_df = build_forecast_panel(
+        df,
+        train_end=origin,
+        forecast_start=first_test,
+        forecast_end=last_test,
+        lookback_days=config.get("split", {}).get("panel_lookback_days", 90),
+    )
+    fold_df = add_all_features(
+        fold_df,
+        feature_cfg=config.get("features", {}),
+        train_end=origin,
+    )
+    if config.get("use_log_sales", False):
+        fold_df = apply_log_transform(fold_df)
+
+    train_df = fold_df[fold_df[_DATE].isin(train_dates)].copy()
+    test_df = fold_df[fold_df[_DATE].isin(test_dates)].copy()
+    if eval_days is not None and eval_days > 0:
+        first_n_dates = sorted(test_df[_DATE].unique())[:eval_days]
+        test_df = test_df[test_df[_DATE].isin(first_n_dates)]
+    return _scale_per_fold(train_df, test_df, config)
+
+
 def _aggregate(fold_metrics: list[dict]) -> dict:
     """mean/std qua các fold cho từng metric."""
     aggregated = {}
@@ -63,7 +99,7 @@ def walk_forward_cv(
     Args:
         model_class: BaseModel subclass khởi tạo lại mỗi fold
         config: Model config dict
-        df: Full DataFrame đã add features (+ log transform), sorted theo series_id, date
+        df: Cleaned DataFrame trước feature engineering, sorted theo series_id, date
         n_splits: số fold
         expanding: True = expanding window; False = sliding window
         eval_days: giới hạn N ngày đầu mỗi test fold (None = toàn bộ)
@@ -88,14 +124,7 @@ def walk_forward_cv(
         if len(test_dates) == 0:
             continue
 
-        train_df = df[df[_DATE].isin(train_dates)].copy()
-        test_df = df[df[_DATE].isin(test_dates)].copy()
-
-        if eval_days is not None and eval_days > 0:
-            first_n_dates = sorted(test_df[_DATE].unique())[:eval_days]
-            test_df = test_df[test_df[_DATE].isin(first_n_dates)]
-
-        train_df, test_df = _scale_per_fold(train_df, test_df, config)
+        train_df, test_df = _prepare_fold(df, config, train_dates, test_dates, eval_days)
 
         model = model_class(config)
         start = time.time()
@@ -128,58 +157,8 @@ def walk_forward_cv_pretrained(
     expanding: bool = True,
     eval_days: int = None,
 ) -> dict:
-    """Walk-forward CV dùng model đã train sẵn — bỏ retrain, chỉ predict + đánh giá.
-
-    Context rows (seq_len + H - 1) prepend per series_id trước mỗi fold test để
-    LSTM đủ lịch sử cho prediction đầu tiên.
-    """
-    dates = sorted(df[_DATE].unique())
-    total = len(dates)
-    step = total // (n_splits + 1)
-
-    model_cfg = config.get("model", {})
-    ctx_len = model_cfg.get("seq_len", 30) + model_cfg.get("forecast_horizon", 1) - 1
-
-    fold_metrics = []
-    for fold in range(n_splits):
-        train_end_idx = step * (fold + 1)
-        test_start_idx = train_end_idx
-        test_end_idx = min(train_end_idx + step, total)
-        train_dates = dates[:train_end_idx]
-        test_dates = dates[test_start_idx:test_end_idx]
-        if len(test_dates) == 0:
-            continue
-
-        train_df = df[df[_DATE].isin(train_dates)].copy()
-        test_df = df[df[_DATE].isin(test_dates)].copy()
-
-        if eval_days is not None and eval_days > 0:
-            first_n_dates = sorted(test_df[_DATE].unique())[:eval_days]
-            test_df = test_df[test_df[_DATE].isin(first_n_dates)]
-
-        train_df, test_df = _scale_per_fold(train_df, test_df, config)
-
-        # Prepend context per series_id -> sequence models cần seq_len ngày lịch sử
-        if _GROUP in train_df.columns:
-            ctx_df = train_df.groupby(_GROUP, group_keys=False).tail(ctx_len)
-        else:
-            ctx_df = train_df.tail(ctx_len)
-
-        combined = pd.concat([ctx_df, test_df]).reset_index(drop=True)
-        predictions = model.predict(combined)
-        predictions = predictions[len(ctx_df):]
-
-        y_true = test_df[_TARGET].values
-        if config.get("use_log_sales", False):
-            y_true = np.expm1(y_true.astype(float))
-
-        metrics = evaluate_all(y_true, predictions, _fold_weights(test_df))
-        metrics["fold"] = fold
-        metrics["training_time_seconds"] = 0.0
-        fold_metrics.append(metrics)
-
-    return {
-        "folds": fold_metrics,
-        "aggregated": _aggregate(fold_metrics),
-        "n_splits": len(fold_metrics),
-    }
+    """Reject pretrained CV: a model fit after a historical fold would leak future data."""
+    raise ValueError(
+        "Pretrained walk-forward CV is not valid because the saved model has seen data "
+        "after historical folds. Run CV without --run-dir so each fold retrains."
+    )

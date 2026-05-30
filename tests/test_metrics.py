@@ -1,6 +1,7 @@
 """Tests for evaluation metrics (Favorita NWRMSLE)."""
 
 import numpy as np
+import pytest
 
 from src.evaluation.metrics import (
     evaluate_all,
@@ -61,3 +62,8 @@ def test_evaluate_all_accepts_weights():
     w = perishable_weights([1, 0, 1])
     result = evaluate_all(np.array([10, 20, 30]), np.array([11, 19, 31]), w)
     assert result["nwrmsle"] >= 0
+
+
+def test_evaluate_all_rejects_empty_arrays():
+    with pytest.raises(ValueError, match="empty"):
+        evaluate_all(np.array([]), np.array([]))

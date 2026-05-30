@@ -16,7 +16,7 @@ import pandas as pd
 import typer
 
 from src.data.features import add_all_features, apply_log_transform
-from src.data.loader import load_cleaned_data, load_raw_data, select_series
+from src.data.loader import load_cleaned_data, load_raw_data, prepare_holdout_panel, select_series
 from src.data.preprocessor import preprocess
 from src.models import MODEL_REGISTRY, get_model_class
 from src.utils.config import load_config, make_param_slug
@@ -28,7 +28,7 @@ from src.utils.visualization import (
     plot_predictions_zoomed,
     plot_residuals,
 )
-from src.evaluation.metrics import evaluate_all
+from src.evaluation.metrics import evaluate_all, weights_from_frame
 
 app = typer.Typer(help="Train time series forecasting models.")
 
@@ -97,6 +97,7 @@ def _train_single(model_name: str, overrides: dict, experiment_name: str = ""):
     # chọn mẫu đại diện chuỗi cho per-series models (ARIMA/SARIMAX/Prophet)
     # XGBoost/LSTM dùng toàn bộ nếu series_sample.n_series=null
     df = select_series(df, config)
+    df = prepare_holdout_panel(df, config)
 
     typer.echo("Adding features...")
     feature_cfg = config.get("features", {})
@@ -146,8 +147,12 @@ def _train_single(model_name: str, overrides: dict, experiment_name: str = ""):
         if "series_id" in train_df.columns else train_df.tail(_ctx_len)
     val_predictions = _predict_with_context(train_ctx_val, val_df)
     y_true_val = _get_true_sales(val_df)
-    metrics = evaluate_all(y_true_val, val_predictions)
-    typer.echo(f"Validation metrics: {metrics}")
+    metrics = {}
+    if len(val_df) > 0:
+        metrics = evaluate_all(y_true_val, val_predictions, weights_from_frame(val_df))
+        typer.echo(f"Validation metrics: {metrics}")
+    else:
+        typer.echo("Validation metrics: skipped (validation split is empty)")
 
     def _build_test_context():
         """Trả về (combined_df, n_ctx): combined đã có context đủ ctx_len rows."""
@@ -168,7 +173,7 @@ def _train_single(model_name: str, overrides: dict, experiment_name: str = ""):
     test_predictions_full = model.predict(_test_combined)
     test_predictions = test_predictions_full[_n_ctx:]
     y_true_test = _get_true_sales(test_df)
-    test_metrics = evaluate_all(y_true_test, test_predictions)
+    test_metrics = evaluate_all(y_true_test, test_predictions, weights_from_frame(test_df))
     typer.echo(f"Test metrics:       {test_metrics}")
 
     results = model.get_result_template(metrics, param_slug=param_slug, experiment_name=experiment_name)

@@ -38,13 +38,12 @@ class BaseModel(ABC):
         lấy từ cờ perishable nếu có.
         """
         import numpy as np
-        from src.evaluation.metrics import perishable_weights
+        from src.evaluation.metrics import weights_from_frame
         predictions = self.predict(df)
         y_true = df["unit_sales"].values.astype(float)
         if self.config.get("use_log_sales", False):
             y_true = np.expm1(y_true)
-        weights = perishable_weights(df["perishable"].values) if "perishable" in df.columns else None
-        return evaluate_all(y_true, predictions, weights)
+        return evaluate_all(y_true, predictions, weights_from_frame(df))
 
     def save(self, path: str):
         """Save model to disk."""

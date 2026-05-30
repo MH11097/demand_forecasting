@@ -8,10 +8,10 @@ from pathlib import Path
 import typer
 
 from src.data.features import add_all_features, apply_log_transform
-from src.data.loader import load_raw_data, select_series
+from src.data.loader import load_raw_data, prepare_holdout_panel, select_series
 from src.data.preprocessor import preprocess
-from src.evaluation.cross_validation import walk_forward_cv, walk_forward_cv_pretrained
-from src.evaluation.metrics import evaluate_all
+from src.evaluation.cross_validation import walk_forward_cv
+from src.evaluation.metrics import evaluate_all, weights_from_frame
 from src.models import get_model_class
 from src.models.base import BaseModel
 from src.utils.config import load_config
@@ -45,27 +45,13 @@ def evaluate(
         df, _ = load_raw_data(config)
         # chọn mẫu đại diện chuỗi cho per-series models (theo series_sample config)
         df = select_series(df, config)
-        df = add_all_features(df, feature_cfg=config.get("features", {}))
-        if config.get("use_log_sales", False):
-            df = apply_log_transform(df)
-
         if run_dir:
-            # CV nhanh: dùng model đã train sẵn, bỏ retrain mỗi fold
-            model_path = Path(run_dir) / "model.pkl"
-            if not model_path.exists():
-                typer.echo(f"Model not found at {model_path}", err=True)
-                raise typer.Exit(1)
-            typer.echo(f"Loading pre-trained model from {model_path}")
-            loaded_model = BaseModel.load(str(model_path))
-
-            cv_results = walk_forward_cv_pretrained(
-                loaded_model,
-                config,
-                df,
-                n_splits=n_splits,
-                expanding=(cv == "expanding"),
-                eval_days=eval_days,
+            typer.echo(
+                "CV với --run-dir không hợp lệ: saved model đã thấy tương lai của các "
+                "fold lịch sử. Bỏ --run-dir để retrain theo từng fold.",
+                err=True,
             )
+            raise typer.Exit(1)
         else:
             # CV chuẩn: retrain từ đầu mỗi fold (walk-forward thực sự)
             model_class = get_model_class(model)
@@ -115,6 +101,7 @@ def evaluate(
     df, _ = load_raw_data(config)
     # chọn mẫu đại diện chuỗi cho per-series models (theo series_sample config)
     df = select_series(df, config)
+    df = prepare_holdout_panel(df, config)
     # train_end → group-mean encodings train-only (chống leakage)
     df = add_all_features(df, feature_cfg=config.get("features", {}),
                           train_end=config.get("split", {}).get("train_end"))
@@ -156,7 +143,7 @@ def evaluate(
         if len(split_df) == 0:
             continue
         y_true = _get_true_sales(split_df)
-        metrics = evaluate_all(y_true, preds)
+        metrics = evaluate_all(y_true, preds, weights_from_frame(split_df))
         typer.echo(f"{split_name.capitalize()} metrics: {metrics}")
 
         # Save plots

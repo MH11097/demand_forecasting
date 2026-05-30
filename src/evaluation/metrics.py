@@ -8,6 +8,22 @@ log1p(clip(.,0)) -> phạt sai số tương đối, không cho giá trị âm.
 import numpy as np
 
 
+def _validate_inputs(
+    y_true: np.ndarray, y_pred: np.ndarray, weights: np.ndarray | None = None
+) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
+    """Reject empty or misaligned evaluation sets instead of reporting fake scores."""
+    yt = np.asarray(y_true, dtype=float)
+    yp = np.asarray(y_pred, dtype=float)
+    if yt.size == 0 or yp.size == 0:
+        raise ValueError("Cannot evaluate an empty prediction set")
+    if yt.shape != yp.shape:
+        raise ValueError(f"y_true and y_pred shape mismatch: {yt.shape} != {yp.shape}")
+    w = None if weights is None else np.asarray(weights, dtype=float)
+    if w is not None and w.shape != yt.shape:
+        raise ValueError(f"weights shape mismatch: {w.shape} != {yt.shape}")
+    return yt, yp, w
+
+
 def nwrmsle(y_true: np.ndarray, y_pred: np.ndarray, weights: np.ndarray | None = None) -> float:
     """Normalized Weighted Root Mean Squared Logarithmic Error (Favorita metric).
 
@@ -15,14 +31,13 @@ def nwrmsle(y_true: np.ndarray, y_pred: np.ndarray, weights: np.ndarray | None =
     weights=None -> RMSLE không trọng số (mọi w=1). Truyền weights (1.25 perishable /
     1.0) để khớp đúng công thức competition.
     """
-    yt = np.clip(np.asarray(y_true, dtype=float), 0, None)
-    yp = np.clip(np.asarray(y_pred, dtype=float), 0, None)
+    yt, yp, w = _validate_inputs(y_true, y_pred, weights)
+    yt = np.clip(yt, 0, None)
+    yp = np.clip(yp, 0, None)
     log_diff_sq = (np.log1p(yp) - np.log1p(yt)) ** 2
 
-    if weights is None:
+    if w is None:
         w = np.ones_like(yt)
-    else:
-        w = np.asarray(weights, dtype=float)
     denom = w.sum()
     if denom == 0:
         return 0.0
@@ -35,21 +50,28 @@ def perishable_weights(perishable: np.ndarray) -> np.ndarray:
     return np.where(p > 0, 1.25, 1.0)
 
 
+def weights_from_frame(df) -> np.ndarray | None:
+    """Return official Favorita weights when a dataframe carries perishable flags."""
+    if "perishable" not in df.columns:
+        return None
+    return perishable_weights(df["perishable"].values)
+
+
 def rmse(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     """Root Mean Squared Error."""
-    y_true, y_pred = np.array(y_true, dtype=float), np.array(y_pred, dtype=float)
+    y_true, y_pred, _ = _validate_inputs(y_true, y_pred)
     return float(np.sqrt(np.mean((y_true - y_pred) ** 2)))
 
 
 def mae(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     """Mean Absolute Error."""
-    y_true, y_pred = np.array(y_true, dtype=float), np.array(y_pred, dtype=float)
+    y_true, y_pred, _ = _validate_inputs(y_true, y_pred)
     return float(np.mean(np.abs(y_true - y_pred)))
 
 
 def mape(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     """Mean Absolute Percentage Error. Filters zero actual values."""
-    y_true, y_pred = np.array(y_true, dtype=float), np.array(y_pred, dtype=float)
+    y_true, y_pred, _ = _validate_inputs(y_true, y_pred)
     mask = y_true != 0
     if mask.sum() == 0:
         return 0.0

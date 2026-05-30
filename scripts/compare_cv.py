@@ -16,7 +16,6 @@ from pathlib import Path
 import pandas as pd
 import typer
 
-from src.data.features import add_all_features, apply_log_transform
 from src.data.loader import load_raw_data, select_series
 from src.evaluation.cross_validation import walk_forward_cv
 from src.models import MODEL_REGISTRY, get_model_class
@@ -65,14 +64,6 @@ def compare(
         # load data + chọn mẫu đại diện chuỗi (theo series_sample config)
         df, _ = load_raw_data(config)
         df = select_series(df, config)
-
-        # thêm features
-        feature_cfg = config.get("features", {})
-        df = add_all_features(df, feature_cfg=feature_cfg)
-
-        # log transform nếu model yêu cầu (vd: LSTM dùng log1p(Sales))
-        if config.get("use_log_sales", False):
-            df = apply_log_transform(df)
 
         n_series = df["series_id"].nunique() if "series_id" in df.columns else 0
         typer.echo(f"[{model_name.upper()}] {len(df)} rows, {n_series} series")

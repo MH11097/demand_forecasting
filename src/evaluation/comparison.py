@@ -45,7 +45,11 @@ def comparison_table(results: list[dict]) -> pd.DataFrame:
             "experiment_name": r.get("experiment_name", ""),
             "training_time_seconds": r.get("training_time_seconds", 0),
         }
-        row.update(r.get("metrics", {}))
+        # Prefer the final holdout score. Validation can be absent in the default
+        # config and must not silently rank as a perfect 0.0 run.
+        reported = r.get("test_metrics") or r.get("metrics", {})
+        row["evaluation_split"] = "test" if r.get("test_metrics") else "validation"
+        row.update(reported)
         rows.append(row)
 
     df = pd.DataFrame(rows)
