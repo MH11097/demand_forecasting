@@ -64,6 +64,10 @@ huggingface/
 CLAUDE.md
 plans
 docs
+
+# Isolated feature workspaces
+.worktrees/
+
 # OS
 .DS_Store
 Thumbs.db
@@ -75,4 +79,3 @@ Thumbs.db
 
 EXPERIMENT_REPORT.md
 HUONG_DAN_UV.md
-
