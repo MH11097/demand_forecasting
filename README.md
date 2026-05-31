@@ -55,15 +55,36 @@ source /root/.venvs/demand_forecasting/bin/activate
 
 | Model | Loại | Cách fit | Phạm vi |
 |-------|------|----------|---------|
-| ARIMA | Thống kê | Per-series (1 model/chuỗi) | Mẫu ~40 chuỗi đại diện |
-| SARIMAX | Thống kê | Per-series + Fourier exog | Mẫu ~40 chuỗi đại diện |
-| Prophet | Thống kê | Per-series | Mẫu ~40 chuỗi đại diện |
-| XGBoost | ML | Global (store/item + exog) | Toàn bộ chuỗi trong cluster |
-| LSTM | Deep Learning | Global (embedding store/item) | Toàn bộ chuỗi trong cluster |
+| ARIMA | Thống kê | Per-series, không exog (baseline) | Mẫu ~40 chuỗi đại diện |
+| SARIMAX | Thống kê | Per-series + shared temporal exog | Mẫu ~40 chuỗi đại diện |
+| Prophet | Thống kê | Per-series + native seasonality + regressors | Mẫu ~40 chuỗi đại diện |
+| XGBoost | ML | Global + shared exog + sales history | Toàn bộ chuỗi trong cluster |
+| LSTM | Deep Learning | Global + shared exog + sales history | Toàn bộ chuỗi trong cluster |
 
 - **Phạm vi = 1 cluster store.** Bộ Favorita đầy đủ (54 store × ~4100 item, ~125M dòng) quá lớn → lọc **1 nhóm store** (`store_filter` trong `configs/base.yaml`, mặc định `cluster=[1]`).
 - **Per-series (ARIMA/SARIMAX/Prophet)** fit 1 model/chuỗi → chọn mẫu ~40 chuỗi (`series_sample`). **Global (XGBoost/LSTM)** dùng toàn bộ chuỗi (`series_sample.n_series=null`).
-- **SARIMAX** dùng Fourier exog xác định (weekly K=3 + yearly K=2); KHÔNG dùng oil/onpromotion tương lai làm exog (tránh leakage).
+- **ARIMA** cố ý không dùng exog để làm baseline univariate dễ giải thích.
+
+### Shared external-information benchmark
+
+Các model hỗ trợ exog nhận cùng **nguồn thông tin bên ngoài khả dụng tại forecast
+origin**. Không ép mọi model dùng cùng cách biểu diễn: Prophet có seasonality nội bộ,
+trong khi SARIMAX nhận Fourier tường minh.
+
+| Nguồn thông tin | Biểu diễn | Model dùng |
+|-----------------|-----------|-----------|
+| Mùa vụ lịch | Fourier tuần K=3 + năm K=2, hoặc native seasonality tương đương | SARIMAX, Prophet, XGBoost, LSTM |
+| Ngày đặc biệt | `is_holiday`, `is_event` | SARIMAX, Prophet, XGBoost, LSTM |
+| Chu kỳ chi tiêu | `is_payday` | SARIMAX, Prophet, XGBoost, LSTM |
+| Lịch khuyến mãi | `onpromotion` | SARIMAX, Prophet, XGBoost, LSTM |
+| Đặc tính sản phẩm | `perishable` | XGBoost, LSTM |
+
+- **Fourier không thay thế exog thực.** Fourier mô tả quy luật lặp theo lịch; holiday
+  và promotion mô tả tác động riêng của từng ngày.
+- **`perishable` chỉ đưa vào model global.** Trong SARIMAX/Prophet per-series, mỗi model
+  chỉ fit một `(store,item)` nên `perishable` là hằng số, không giải thích biến động theo ngày.
+- **Oil và transactions không dùng trong benchmark chính.** Giá trị tương lai không tự
+  nhiên biết trước tại forecast origin. Oil vẫn giữ trong cache để làm thí nghiệm phụ.
 
 ## A.2. Temporal split, validate & chiến lược dự báo (CHỐT — mọi người dùng chung)
 
@@ -119,6 +140,7 @@ source /root/.venvs/demand_forecasting/bin/activate
 | `series_sample.n_series` | `40` (per-series) / `null` (global) | số chuỗi fit |
 | `clean.zero_fill` | `true` | bù ngày bán 0 |
 | `data.use_cleaned` | `true` | dùng cache feather |
+| `features.use_oil` | `false` | loại oil khỏi benchmark chính; cache vẫn giữ |
 
 ## A.3. Cấu hình (configs/)
 
@@ -135,8 +157,8 @@ Mỗi model có file `configs/<model>.yaml` chứa knob riêng — chỉnh trự
 | Model | Knob chính |
 |-------|-----------|
 | ARIMA | `model.order` `[p,d,q]`, `model.trend` |
-| SARIMAX | `model.order`, `model.seasonal_order` `[P,D,Q,s=7]`, Fourier exog |
-| Prophet | `changepoint_prior_scale`, `seasonality_mode`, `seasonality_prior_scale` |
+| SARIMAX | `model.order`, `model.seasonal_order` `[P,D,Q,s=7]`, shared temporal exog |
+| Prophet | `changepoint_prior_scale`, `seasonality_mode`, `seasonality_prior_scale`, shared regressors |
 | XGBoost | `n_estimators`, `max_depth`, `learning_rate`, `subsample`, `colsample_bytree`, `reg_alpha/lambda`, `device` |
 | LSTM | `hidden_size`, `num_layers`, `dropout`, `seq_len`, `forecast_horizon`, `epochs`, `patience` |
 
@@ -201,7 +223,7 @@ data/raw/*.csv
 [1] load + join (stores, items)
 [2] lọc nhóm store (store_filter)
 [3] ⭐ ZERO-FILL: reindex mỗi (store,item) về lưới ngày liên tục, +cờ is_imputed
-[4] merge exog: oil (nội suy mọi ngày), holidays (cờ national/regional/local), onpromotion
+[4] merge nguồn exog vào cache: oil (nội suy mọi ngày), holidays (cờ national/regional/local), onpromotion
 [5] clip âm→0 (giữ cờ return để EDA), fill onpromotion→0
    │  loader.prepare_holdout_panel()              ← fixed panel theo forecast origin
    │  features.add_all_features(train_end=...)    ← lag/rolling/group-mean chỉ dùng lịch sử train
@@ -216,7 +238,7 @@ data/raw/*.csv
 
 **Các nhóm feature** (bật/tắt trong `configs/features.yaml`):
 - **Time + cyclical**: year, month, dayofweek, is_weekend, sin/cos.
-- **Fourier**: weekly K=3, yearly K=2 (mùa vụ liên tục, exog nền cho SARIMAX).
+- **Fourier**: weekly K=3, yearly K=2 (mùa vụ lịch liên tục; Prophet dùng native seasonality tương đương).
 - **Lag**: `unit_sales_lag_{1,7,14,28,30,60,90,365}` theo từng chuỗi.
 - **Rolling**: mean/std/median cửa sổ 7/14/30 (shift(1) chống leakage).
 - **Group-mean**: store_avg, item_avg, family_avg, series_dow_avg; fit train-only,
@@ -224,8 +246,11 @@ data/raw/*.csv
 - **Payday** (lương Ecuador 15 & cuối tháng): is_payday, days_since/to_payday.
 - **Promo**: promo_rolling_rate, promo_count_7/14/30, days_since_last/until_next_promo.
 - **Zero-sales**: zero_sales_last_28 (ngày ghi nhận bán 0; không suy diễn stockout).
-- **Exog Favorita**: dcoilwtico + oil_lag_7, holiday/event flags riêng, perishable
-  (cờ + trọng số NWRMSLE), is_imputed.
+- **Exog Favorita**: holiday/event flags riêng, onpromotion, perishable (cờ + trọng số
+  NWRMSLE). dcoilwtico + oil_lag_7 vẫn tạo được khi bật `features.use_oil=true`.
+
+> Feature engineering có thể tạo nhiều cột phục vụ EDA hoặc thí nghiệm phụ. Benchmark
+> chính chỉ đưa shared external information và feature lịch sử chống leakage vào model.
 
 > Cache `data/cleaned/train_cleaned.feather` giữ phần clean+zero-fill (nặng); feature áp dụng lúc load. Cache mới có manifest cấu hình; cache legacy không có manifest sẽ bị từ chối. Rebuild một lần bằng `python scripts/clean_data.py`.
 
@@ -257,15 +282,15 @@ demand_forecasting/
 - **GPU/CPU:** XGBoost & LSTM ưu tiên CUDA nếu có (cấu hình PyTorch cu118). Không có GPU / GPU yếu → `--set model.device=cpu`.
 - **Tài nguyên:** `train.csv` ~125M dòng. `clean_data.py` load toàn bộ → lọc cluster 1 → zero-fill ra **~12.46M dòng (~4.5 GB RAM, cache feather 291 MB)**; lần build đầu mất **vài phút–vài chục phút** (tùy I/O đĩa). Train sau đó dùng cache → nhanh.
 - **Chẩn đoán độ thưa:** `python scripts/measure_sparsity.py` (đo tỉ lệ implicit-zero + ước lượng RAM sau reindex).
-- **Chạy test:** `python -m pytest tests/ -q` (44 test: cleaner, features, loader, preprocessor, metrics, config, comparison, CV, model flags).
+- **Chạy test:** `python -m pytest tests/ -q`.
 
 ---
 
 ## Trạng thái & bước tiếp
 
 ✅ **Đã xong (data layer, sẵn sàng baseline tiểu luận):** zero-fill bound first-sale,
-fixed pseudo-holdout panel, origin-safe target features, weighted NWRMSLE, cache validation,
-EDA trực quan tiếng Việt. Tests 44/44 pass.
+fixed pseudo-holdout panel, origin-safe target features, shared forecast-exog contract,
+weighted NWRMSLE, cache validation, EDA trực quan tiếng Việt.
 
 ⏭ **Bước tiếp (model layer):**
 1. Chọn `(p,d,q)(P,D,Q)₇` thật cho ARIMA/SARIMAX qua ACF/PACF (notebook mục 9) — hiện đang placeholder `(1,1,1)`.
@@ -277,5 +302,5 @@ EDA trực quan tiếng Việt. Tests 44/44 pass.
 - **ARIMA/SARIMAX order là placeholder `(1,1,1)`** → cần tune qua ACF/PACF, metric hiện chưa phản ánh năng lực thật.
 - **XGBoost qua `train.py` có thể treo ở bước predict trên GPU yếu** → dùng `--set model.device=cpu`.
 - **Pseudo-holdout cold start:** chỉ gồm series đã xuất hiện gần forecast origin; Kaggle test thật có panel chính thức nên cần xử lý cold start riêng nếu làm submission.
-- **Oil:** hợp lệ trong benchmark local vì file có dữ liệu tới horizon, nhưng khi triển khai thực tế cần thay bằng forecast hoặc scenario.
-- **`docs/` và `plans/` bị gitignore** — README (gốc) được track nên người clone vẫn thấy hướng dẫn này; chi tiết phương pháp trong `docs/` chỉ có ở máy local.
+- **Oil:** tắt trong benchmark chính; có thể bật cho thí nghiệm phụ nếu dùng forecast hoặc scenario.
+- **`docs/` và `plans/` mặc định bị gitignore** — chỉ force-add tài liệu cần chia sẻ.
