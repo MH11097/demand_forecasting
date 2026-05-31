@@ -1,9 +1,4 @@
-"""SARIMAX model — per-series với seasonal component m=7 và Fourier exog.
-
-Không có dữ liệu ngoại sinh thực (promotions, holidays) nên dùng
-Fourier terms (weekly K=3, yearly K=2) làm exog tổng hợp — chuẩn
-theo top Kaggle kernels cho dataset này.
-"""
+"""SARIMAX model — per-series with seasonal component and shared temporal exog."""
 
 import logging
 import time
@@ -13,7 +8,7 @@ import numpy as np
 import pandas as pd
 from statsmodels.tsa.statespace.sarimax import SARIMAX as StatsSARIMAX
 
-from src.data.features import fourier_cols
+from src.data.forecast_exog import require_columns, temporal_forecast_exog_cols
 from src.models.base import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -33,15 +28,15 @@ class SARIMAXModel(BaseModel):
         self.maxiter = model_cfg.get("maxiter", 200)
         self.models: dict[int, object] = {}
         self.train_lengths: dict[int, int] = {}
-        # tên cột Fourier exog (dùng features.fourier_cols() để đồng bộ với data pipeline)
-        self._exog_cols = fourier_cols()
+        # Shared forecast-time signals: Fourier, holiday/event, payday, promotion.
+        self._exog_cols = temporal_forecast_exog_cols(config.get("features", {}))
 
     def _get_exog(self, df: pd.DataFrame) -> np.ndarray | None:
-        """Trích Fourier exog từ df. Trả về None nếu không có cột nào."""
-        available = [c for c in self._exog_cols if c in df.columns]
-        if not available:
+        """Extract shared temporal exog in stable order for fit and forecast."""
+        if not self._exog_cols:
             return None
-        return df[available].values.astype(float)
+        require_columns(df, self._exog_cols, "SARIMAX")
+        return df[self._exog_cols].values.astype(float)
 
     def train(self, train_df: pd.DataFrame, val_df: pd.DataFrame | None = None) -> dict:
         start = time.time()
