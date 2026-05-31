@@ -44,7 +44,7 @@ def _stores():
 def _items():
     return pd.DataFrame({
         "item_nbr": [10, 20],
-        "family": ["GROCERY", "BEVERAGES"],
+        "family": ["DAIRY", "BEVERAGES"],
         "class": [1001, 2002],
         "perishable": [1, 0],
     })
@@ -98,6 +98,14 @@ def test_apply_store_filter_by_cluster():
     assert set(out["store_nbr"].unique()) == {1}
 
 
+def test_apply_item_filter_by_family():
+    df = cleaner.join_metadata(_train(), _stores(), _items())
+    config = {"item_filter": {"by": "family", "value": ["DAIRY"]}}
+    out = cleaner.apply_item_filter(df, config)
+    assert set(out["family"].unique()) == {"DAIRY"}
+    assert set(out["item_nbr"].unique()) == {10}
+
+
 def test_merge_oil_interpolates():
     df = cleaner.merge_oil(_train(), _oil())
     assert df["dcoilwtico"].isnull().sum() == 0
@@ -137,10 +145,12 @@ def test_build_dataset(tmp_path):
             "stores": "stores.csv", "items": "items.csv",
             "oil": "oil.csv", "holidays": "holidays_events.csv"}},
         "store_filter": {"by": "cluster", "value": [1]},
+        "item_filter": {"by": "family", "value": ["DAIRY"]},
         "exog": {"use_transactions": False},
     }
     df = cleaner.build_dataset(config)
     assert set(df["store_nbr"].unique()) == {1}     # đã lọc cluster 1
+    assert set(df["family"].unique()) == {"DAIRY"}  # đã lọc family DAIRY
     assert df["unit_sales"].min() >= 0              # đã clip
     assert "perishable" in df.columns and "is_holiday" in df.columns
 
@@ -180,6 +190,26 @@ def test_load_cleaned_data_rejects_manifest_config_mismatch(tmp_path):
     requested = {
         "data": {"cleaned_dir": str(cleaned)},
         "store_filter": {"by": "store_nbr", "value": [1]},
+    }
+    with pytest.raises(ValueError, match="config mismatch"):
+        loader.load_cleaned_data(requested)
+
+
+def test_load_cleaned_data_rejects_manifest_item_filter_mismatch(tmp_path):
+    cleaned = tmp_path / "cleaned"
+    cleaned.mkdir()
+    _train().to_csv(cleaned / "train_cleaned.csv", index=False)
+    cached_config = {
+        "data": {"cleaned_dir": str(cleaned)},
+        "store_filter": {"by": "cluster", "value": [1]},
+        "item_filter": None,
+    }
+    with open(cleaned / "train_cleaned.manifest.json", "w") as f:
+        json.dump({"cache_signature": cleaner.cache_signature(cached_config)}, f)
+    requested = {
+        "data": {"cleaned_dir": str(cleaned)},
+        "store_filter": {"by": "cluster", "value": [1]},
+        "item_filter": {"by": "family", "value": ["DAIRY"]},
     }
     with pytest.raises(ValueError, match="config mismatch"):
         loader.load_cleaned_data(requested)

@@ -110,6 +110,8 @@ def compare(
             "mae_std":    agg.get("mae_std"),
             "mape_mean":  agg.get("mape_mean"),
             "mape_std":   agg.get("mape_std"),
+            "rmspe_mean": agg.get("rmspe_mean"),
+            "rmspe_std":  agg.get("rmspe_std"),
             "avg_fold_time": round(total_time / max(n_splits, 1), 1),
             "total_time": round(total_time, 1),
         }

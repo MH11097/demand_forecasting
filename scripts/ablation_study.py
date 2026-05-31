@@ -91,6 +91,7 @@ def _train_and_evaluate(
         "rmse": metrics["rmse"],
         "mae": metrics["mae"],
         "mape": metrics["mape"],
+        "rmspe": metrics["rmspe"],
     }
 
 
@@ -230,6 +231,7 @@ def run(
                 "rmse": result["rmse"],
                 "mae": result["mae"],
                 "mape": result["mape"],
+                "rmspe": result["rmspe"],
                 "time_s": result["training_time"],
             }
         )

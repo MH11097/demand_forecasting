@@ -78,15 +78,27 @@ def mape(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     return float(np.mean(np.abs((y_true[mask] - y_pred[mask]) / y_true[mask])))
 
 
+def rmspe(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    """Root Mean Squared Percentage Error. Filters zero actual values."""
+    y_true, y_pred, _ = _validate_inputs(y_true, y_pred)
+    mask = y_true != 0
+    if mask.sum() == 0:
+        return 0.0
+    percentage_error = (y_true[mask] - y_pred[mask]) / y_true[mask]
+    return float(np.sqrt(np.mean(percentage_error**2)))
+
+
 def evaluate_all(y_true: np.ndarray, y_pred: np.ndarray, weights: np.ndarray | None = None) -> dict:
     """Compute all metrics and return as dict.
 
     NWRMSLE (competition) để đầu tiên (primary). RMSE (scale gốc), MAE (trực quan),
-    MAPE (%) là secondary. weights = trọng số perishable cho NWRMSLE (optional).
+    MAPE/RMSPE (%) là secondary trên actual khác 0. weights = trọng số perishable
+    cho NWRMSLE (optional).
     """
     return {
         "nwrmsle": round(nwrmsle(y_true, y_pred, weights), 6),
         "rmse": round(rmse(y_true, y_pred), 4),
         "mae": round(mae(y_true, y_pred), 4),
         "mape": round(mape(y_true, y_pred), 6),
+        "rmspe": round(rmspe(y_true, y_pred), 6),
     }

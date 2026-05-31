@@ -18,7 +18,7 @@ from src.evaluation.metrics import evaluate_all, perishable_weights
 _DATE = "date"
 _TARGET = "unit_sales"
 _GROUP = "series_id"
-_METRIC_KEYS = ["nwrmsle", "rmse", "mae", "mape"]
+_METRIC_KEYS = ["nwrmsle", "rmse", "mae", "mape", "rmspe"]
 
 
 def _fold_weights(test_df: pd.DataFrame) -> np.ndarray | None:

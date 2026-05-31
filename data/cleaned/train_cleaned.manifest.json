@@ -16,6 +16,12 @@
       "stores": "stores.csv",
       "transactions": "transactions.csv"
     },
+    "item_filter": {
+      "by": "family",
+      "value": [
+        "DAIRY"
+      ]
+    },
     "store_filter": {
       "by": "cluster",
       "value": [

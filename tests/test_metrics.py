@@ -10,6 +10,7 @@ from src.evaluation.metrics import (
     nwrmsle,
     perishable_weights,
     rmse,
+    rmspe,
 )
 
 
@@ -51,11 +52,18 @@ def test_rmse_mae_mape():
     assert 0 < mape(np.array([100, 200]), np.array([90, 210])) < 1
 
 
+def test_rmspe_filters_zero_actual_values():
+    y_true = np.array([0.0, 100.0, 200.0])
+    y_pred = np.array([999.0, 90.0, 220.0])
+    expected = np.sqrt(np.mean([0.1**2, 0.1**2]))
+    assert np.isclose(rmspe(y_true, y_pred), expected)
+
+
 def test_evaluate_all_keys():
     result = evaluate_all(np.array([10, 20, 30]), np.array([11, 19, 31]))
-    assert set(result) == {"nwrmsle", "rmse", "mae", "mape"}
+    assert set(result) == {"nwrmsle", "rmse", "mae", "mape", "rmspe"}
     # metric cũ phải BIẾN MẤT
-    assert "smape" not in result and "rmspe" not in result
+    assert "smape" not in result
 
 
 def test_evaluate_all_accepts_weights():

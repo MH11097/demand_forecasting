@@ -2,7 +2,7 @@
 
 Wrapper CLI quanh src.data.cleaner.build_dataset(): load tất cả file Favorita
 (train + stores/items/oil/holidays/transactions), join metadata, merge exog,
-clip unit_sales âm, lọc 1 nhóm store (store_filter), sort → lưu ra cleaned.
+clip unit_sales âm, lọc store/item metadata trước zero-fill, sort → lưu ra cleaned.
 """
 
 import argparse

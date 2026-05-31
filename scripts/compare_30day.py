@@ -1,8 +1,8 @@
 """So sánh 5 models trên 30-day forecast: bảng metrics + biểu đồ Actual vs Forecast + Error comparison.
 
 Output lưu tại results/comparison/:
-  - comparison_table.csv / .md   — bảng MAE, RMSE, MAPE (CV 5-fold mean ± std)
-  - error_comparison.png         — bar chart so sánh 3 metrics
+  - comparison_table.csv / .md   — bảng MAE, RMSE, MAPE, RMSPE (CV 5-fold mean ± std)
+  - error_comparison.png         — bar chart so sánh các metrics
   - actual_vs_forecast.png       — overlay actual + 5 model predictions (30 ngày, trung bình qua stores)
   - error_by_model.png           — boxplot/bar chart phân phối error theo model
 """
@@ -67,7 +67,7 @@ PALETTE = {
 # 1. BẢNG SO SÁNH TỪ CV RESULTS
 # ═══════════════════════════════════════════════════════════════════════════════
 def build_cv_table() -> pd.DataFrame:
-    """Đọc cv_results.json của 5 models → tạo bảng so sánh MAE, RMSE, MAPE."""
+    """Đọc cv_results.json của 5 models → tạo bảng so sánh metrics."""
     rows = []
     for model_name in MODELS:
         cv_path = Path(f"results/{model_name}/cv/cv_results.json")
@@ -77,7 +77,7 @@ def build_cv_table() -> pd.DataFrame:
         with open(cv_path) as f:
             cv = json.load(f)
         agg = cv["aggregated"]
-        rows.append({
+        row = {
             "Model": DISPLAY_NAMES[model_name],
             "MAE": f"{agg['mae_mean']:.1f} ± {agg['mae_std']:.1f}",
             "RMSE": f"{agg['rmse_mean']:.1f} ± {agg['rmse_std']:.1f}",
@@ -88,7 +88,11 @@ def build_cv_table() -> pd.DataFrame:
             "_rmse": agg["rmse_mean"],
             "_mape": agg["mape_mean"],
             "_nwrmsle": agg["nwrmsle_mean"],
-        })
+        }
+        if "rmspe_mean" in agg:
+            row["RMSPE (%)"] = f"{agg['rmspe_mean'] * 100:.2f} ± {agg['rmspe_std'] * 100:.2f}"
+            row["_rmspe"] = agg["rmspe_mean"]
+        rows.append(row)
     df = pd.DataFrame(rows)
     # Sort theo NWRMSLE (primary metric)
     df = df.sort_values("_nwrmsle").reset_index(drop=True)
@@ -97,7 +101,10 @@ def build_cv_table() -> pd.DataFrame:
 
 def save_table(df: pd.DataFrame):
     """Lưu bảng so sánh dạng CSV và Markdown."""
-    display_cols = ["Model", "MAE", "RMSE", "MAPE (%)", "NWRMSLE"]
+    display_cols = ["Model", "MAE", "RMSE", "MAPE (%)"]
+    if "RMSPE (%)" in df.columns:
+        display_cols.append("RMSPE (%)")
+    display_cols.append("NWRMSLE")
     # CSV
     df[display_cols].to_csv(OUTPUT_DIR / "comparison_table.csv", index=False)
     # Markdown
@@ -114,20 +121,26 @@ def save_table(df: pd.DataFrame):
 # 2. ERROR COMPARISON BAR CHART
 # ═══════════════════════════════════════════════════════════════════════════════
 def plot_error_comparison(df: pd.DataFrame):
-    """Bar chart so sánh MAE, RMSE, MAPE, NWRMSLE của 5 models."""
+    """Bar chart so sánh MAE, RMSE, MAPE, RMSPE, NWRMSLE của 5 models."""
     metrics = [
         ("_mae", "MAE", "Mean Absolute Error"),
         ("_rmse", "RMSE", "Root Mean Squared Error"),
         ("_mape", "MAPE (%)", "Mean Absolute Percentage Error"),
+        ("_rmspe", "RMSPE (%)", "Root Mean Squared Percentage Error"),
         ("_nwrmsle", "NWRMSLE", "Normalized Weighted RMSLE"),
     ]
-    fig, axes = plt.subplots(1, 4, figsize=(24, 6))
+    metrics = [
+        metric for metric in metrics
+        if metric[0] in df.columns and df[metric[0]].notna().all()
+    ]
+    fig, axes = plt.subplots(1, len(metrics), figsize=(6 * len(metrics), 6))
+    axes = np.atleast_1d(axes)
 
     for ax, (col, label, title) in zip(axes, metrics):
         plot_df = df.set_index("Model").loc[MODEL_ORDER].reset_index()
         values = plot_df[col].values
         if "pe" in col:
-            values = values * 100  # percent (MAPE & NWRMSLE)
+            values = values * 100  # percentage metrics
         colors = [PALETTE[m] for m in plot_df["Model"]]
 
         bars = ax.bar(plot_df["Model"], values, color=colors, edgecolor="white", linewidth=0.8)
@@ -338,7 +351,11 @@ def main():
     print("\n[1/4] Building CV comparison table...")
     cv_df = build_cv_table()
     save_table(cv_df)
-    print(cv_df[["Model", "MAE", "RMSE", "MAPE (%)", "NWRMSLE"]].to_string(index=False))
+    display_cols = ["Model", "MAE", "RMSE", "MAPE (%)"]
+    if "RMSPE (%)" in cv_df.columns:
+        display_cols.append("RMSPE (%)")
+    display_cols.append("NWRMSLE")
+    print(cv_df[display_cols].to_string(index=False))
 
     # 2. Error comparison bar chart
     print("\n[2/4] Creating error comparison chart...")

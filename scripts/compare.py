@@ -42,7 +42,7 @@ def compare(
         x_col = "experiment_name" if df["experiment_name"].any() else "param_slug"
 
     # vẽ biểu đồ cho từng metric -> nhìn đa chiều, model tốt NWRMSLE chưa chắc tốt MAE
-    for metric in ["nwrmsle", "rmse", "mae", "mape"]:
+    for metric in ["nwrmsle", "rmse", "mae", "mape", "rmspe"]:
         if metric in df.columns:
             plot_metric_comparison(df, metric=metric, x_col=x_col, save_path=str(out_path / f"{metric}_comparison.png"))
 

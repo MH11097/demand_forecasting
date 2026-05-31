@@ -1,7 +1,7 @@
 """Grid search và ablation study engine cho Prophet model.
 
 Workflow: tạo tổ hợp tham số (Cartesian product) → train ProphetModel cho mỗi tổ hợp
-→ thu thập NWRMSLE/RMSE/MAE/MAPE → trả DataFrame kết quả sắp theo NWRMSLE tăng dần.
+→ thu thập NWRMSLE/RMSE/MAE/MAPE/RMSPE → trả DataFrame kết quả sắp theo NWRMSLE tăng dần.
 """
 
 import copy
@@ -81,7 +81,7 @@ def run_grid_search(
                 logger.info(f"  NWRMSLE={metrics['nwrmsle']:.6f} ({elapsed:.1f}s)")
         except Exception as e:
             logger.warning(f"  FAILED: {e}")
-            row = {**params, "nwrmsle": float("inf"), "rmse": float("inf"), "mae": float("inf"), "mape": float("inf"), "time_seconds": 0}
+            row = {**params, "nwrmsle": float("inf"), "rmse": float("inf"), "mae": float("inf"), "mape": float("inf"), "rmspe": float("inf"), "time_seconds": 0}
             results.append(row)
 
     df = pd.DataFrame(results).sort_values("nwrmsle").reset_index(drop=True)
@@ -142,7 +142,7 @@ def run_ablation_study(
             row = {
                 "experiment": exp_name,
                 "regressors": ", ".join(regressors) if regressors else "(none)",
-                "nwrmsle": float("inf"), "rmse": float("inf"), "mae": float("inf"), "mape": float("inf"),
+                "nwrmsle": float("inf"), "rmse": float("inf"), "mae": float("inf"), "mape": float("inf"), "rmspe": float("inf"),
                 "time_seconds": 0,
             }
             results.append(row)

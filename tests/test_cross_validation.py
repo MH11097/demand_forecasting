@@ -48,3 +48,4 @@ def test_walk_forward_cv_builds_fold_local_features():
     result = walk_forward_cv(_MeanModel, config, df, n_splits=2, eval_days=2)
     assert result["n_splits"] == 2
     assert result["aggregated"]["nwrmsle_mean"] > 0
+    assert result["aggregated"]["rmspe_mean"] > 0

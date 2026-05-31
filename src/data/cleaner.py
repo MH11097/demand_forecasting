@@ -8,9 +8,9 @@ Favorita gồm nhiều file:
     oil.csv [date, dcoilwtico]
     holidays_events.csv [date, type, locale, locale_name, description, transferred]
 
-Pipeline: load tất cả → join metadata (stores, items) → merge exog theo date
-(oil nội suy, holidays → cờ boolean theo locale) → clip unit_sales âm về 0 →
-onpromotion NaN→0 → lọc 1 nhóm store (store_filter) → sort.
+Pipeline: load tất cả → join metadata (stores, items) → lọc store/item metadata →
+merge exog theo date (oil nội suy, holidays → cờ boolean theo locale) →
+clip unit_sales âm về 0 → onpromotion NaN→0 → sort.
 
 Functional style: mỗi hàm nhận/trả DataFrame. build_dataset() là điểm vào tổng.
 """
@@ -233,6 +233,20 @@ def apply_store_filter(df: pd.DataFrame, config: dict) -> pd.DataFrame:
     return df[df[by].isin(values)].reset_index(drop=True)
 
 
+def apply_item_filter(df: pd.DataFrame, config: dict) -> pd.DataFrame:
+    """Lọc item theo item_filter.{by, value} sau khi join metadata items.csv."""
+    item_filter = config.get("item_filter")
+    if not item_filter or item_filter.get("value") in (None, [], ""):
+        return df
+    by, value = item_filter["by"], item_filter["value"]
+    if by not in df.columns:
+        raise KeyError(
+            f"item_filter.by='{by}' không có trong cột (cần join items.csv trước)."
+        )
+    values = value if isinstance(value, (list, tuple, set)) else [value]
+    return df[df[by].isin(values)].reset_index(drop=True)
+
+
 def ensure_types(df: pd.DataFrame) -> pd.DataFrame:
     """date=datetime; store_nbr/item_nbr=int; unit_sales=float; onpromotion=int."""
     df = df.copy()
@@ -258,11 +272,12 @@ def sort_data(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def build_dataset(config: dict) -> pd.DataFrame:
-    """Điểm vào: load → join → merge exog → clean → lọc nhóm store → sort."""
+    """Điểm vào: load → join → lọc store/item → zero-fill → merge exog → clean → sort."""
     raw_dir = config["data"]["raw_dir"]
     train, tables = load_raw(raw_dir, config)
     df = join_metadata(train, tables["stores"], tables["items"])
     df = apply_store_filter(df, config)          # lọc sớm -> nhẹ các bước sau
+    df = apply_item_filter(df, config)           # lọc item metadata trước khi zero-fill
     # zero-fill ngày thiếu (implicit zeros) TRƯỚC khi merge exog theo ngày & build lag/rolling
     if config.get("clean", {}).get("zero_fill", True):
         df = reindex_fill_dates(df)
@@ -317,6 +332,7 @@ def cache_signature(config: dict) -> dict:
     return {
         "cache_schema_version": CACHE_SCHEMA_VERSION,
         "store_filter": config.get("store_filter"),
+        "item_filter": config.get("item_filter"),
         "clean": config.get("clean", {}),
         "exog": {
             key: config.get("exog", {}).get(key, default)

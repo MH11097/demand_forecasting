@@ -154,7 +154,7 @@ def grid_search(
                 "order": str(params["order"]),
                 "p": params["order"][0], "d": params["order"][1], "q": params["order"][2],
                 "trend": params["trend"],
-                "nwrmsle": float("inf"), "rmse": float("inf"), "mae": float("inf"), "mape": float("inf"),
+                "nwrmsle": float("inf"), "rmse": float("inf"), "mae": float("inf"), "mape": float("inf"), "rmspe": float("inf"),
                 "time_seconds": 0,
             })
 

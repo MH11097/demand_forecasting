@@ -89,7 +89,7 @@ def plot_top_k_comparison(
     top_df = results_df.nsmallest(k, metric).reset_index(drop=True)
 
     # Tạo nhãn ngắn gọn từ tham số (bỏ cột metric/time)
-    param_cols = [c for c in top_df.columns if c not in ["nwrmsle", "rmse", "mae", "mape", "time_seconds"]]
+    param_cols = [c for c in top_df.columns if c not in ["nwrmsle", "rmse", "mae", "mape", "rmspe", "time_seconds"]]
     labels = []
     for _, row in top_df.iterrows():
         parts = [f"{c}={row[c]}" for c in param_cols]

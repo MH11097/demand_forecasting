@@ -58,11 +58,12 @@ source /root/.venvs/demand_forecasting/bin/activate
 | ARIMA | Thống kê | Per-series, không exog (baseline) | Mẫu ~40 chuỗi đại diện |
 | SARIMAX | Thống kê | Per-series + shared temporal exog | Mẫu ~40 chuỗi đại diện |
 | Prophet | Thống kê | Per-series + native seasonality + regressors | Mẫu ~40 chuỗi đại diện |
-| XGBoost | ML | Global + shared exog + sales history | Toàn bộ chuỗi trong cluster |
-| LSTM | Deep Learning | Global + shared exog + sales history | Toàn bộ chuỗi trong cluster |
+| XGBoost | ML | Global + shared exog + sales history | Toàn bộ chuỗi trong subset DAIRY |
+| LSTM | Deep Learning | Global + shared exog + sales history | Toàn bộ chuỗi trong subset DAIRY |
 
-- **Phạm vi = 1 cluster store.** Bộ Favorita đầy đủ (54 store × ~4100 item, ~125M dòng) quá lớn → lọc **1 nhóm store** (`store_filter` trong `configs/base.yaml`, mặc định `cluster=[1]`).
-- **Per-series (ARIMA/SARIMAX/Prophet)** fit 1 model/chuỗi → chọn mẫu ~40 chuỗi (`series_sample`). **Global (XGBoost/LSTM)** dùng toàn bộ chuỗi (`series_sample.n_series=null`).
+- **Phạm vi = DAIRY tại 1 cluster store.** Bộ Favorita đầy đủ (54 store × ~4100 item, ~125M dòng) quá lớn → lọc `cluster=[1]` bằng `store_filter`, rồi giữ toàn bộ SKU có `family=[DAIRY]` bằng `item_filter`.
+- **Kết quả chỉ đại diện cho subset DAIRY tại cluster 1**, không đại diện cho toàn bộ danh mục Favorita.
+- **Per-series (ARIMA/SARIMAX/Prophet)** fit 1 model/chuỗi → chọn mẫu ~40 chuỗi (`series_sample`). **Global (XGBoost/LSTM)** dùng toàn bộ chuỗi trong subset DAIRY (`series_sample.n_series=null`).
 - **ARIMA** cố ý không dùng exog để làm baseline univariate dễ giải thích.
 
 ### Shared external-information benchmark
@@ -107,7 +108,7 @@ trong khi SARIMAX nhận Fourier tường minh.
     test_end:   "2017-08-15"
   ```
   (XGBoost/LSTM vẫn tự cắt val từ đuôi train cho early-stopping kể cả khi val_df rỗng.)
-- ⚠ File cache là **cluster 1** theo `store_filter` hiện tại. Đổi `store_filter` → **build lại cache** (`python scripts/clean_data.py`).
+- ⚠ File cache là **DAIRY tại cluster 1** theo `store_filter` + `item_filter` hiện tại. Đổi một trong hai filter → **build lại cache** (`python scripts/clean_data.py`).
 - Không leakage: split theo thời gian; group-mean encodings chỉ tính trên train (`train_end`); lag/rolling dùng `shift(1)`.
 
 ### Dự báo bao nhiêu ngày?
@@ -137,6 +138,7 @@ trong khi SARIMAX nhận Fourier tường minh.
 | `loss_fn` | `mse` | MSE trên log ≈ tối ưu NWRMSLE |
 | `metrics.primary` | `nwrmsle` | metric competition |
 | `store_filter` | `cluster=[1]` | nhóm store dùng chung |
+| `item_filter` | `family=[DAIRY]` | ngành hàng duy nhất của benchmark giáo dục |
 | `series_sample.n_series` | `40` (per-series) / `null` (global) | số chuỗi fit |
 | `clean.zero_fill` | `true` | bù ngày bán 0 |
 | `data.use_cleaned` | `true` | dùng cache feather |
@@ -146,7 +148,7 @@ trong khi SARIMAX nhận Fourier tường minh.
 
 | File | Nội dung |
 |------|----------|
-| `base.yaml` | data paths, schema, `store_filter`, `clean.zero_fill`, exog toggles, split dates, `forecast_horizon/strategy`, `use_cleaned`, `seed` |
+| `base.yaml` | data paths, schema, `store_filter`, `item_filter`, `clean.zero_fill`, exog toggles, split dates, `forecast_horizon/strategy`, `use_cleaned`, `seed` |
 | `features.yaml` | bật/tắt từng nhóm feature, danh sách lag/rolling windows |
 | `{model}.yaml` | hyperparameter riêng từng model (arima/sarimax/prophet/xgboost/lstm) |
 
@@ -173,7 +175,8 @@ Các script tuning chuyên sâu khác: `scripts/tune_arima_grid.py`, `tune_sarim
 - **Metric chính — NWRMSLE** (Normalized Weighted RMSLE, metric competition):
 
   `NWRMSLE = sqrt( Σ wᵢ·(log1p(predᵢ) − log1p(trueᵢ))² / Σ wᵢ )`, clip pred/true ≥ 0; trọng số `w = 1.25` cho hàng *perishable*, `1.0` còn lại. **Càng nhỏ càng tốt.**
-- **Phụ:** RMSE, MAE, MAPE.
+- **Phụ:** RMSE, MAE, MAPE và RMSPE. Hai metric phần trăm chỉ tính trên các dòng
+  `actual != 0`; NWRMSLE vẫn là metric chọn model vì xử lý được zero-sales.
 - **Cross-validation:** walk-forward expanding/sliding (`evaluate.py`, `compare_cv.py`).
 
 **Kết quả lưu ở đâu** — mỗi lần `train.py` chạy → `results/<model>/<param_slug>/` (slug gồm hyperparam + horizon + log + strategy + timestamp):
@@ -203,8 +206,9 @@ val_predictions.png,  val_residuals.png,  val_predictions_zoomed.png
 | `holidays_events.csv` | date, type, locale, locale_name, description, transferred |
 
 **Đặc điểm & xử lý:**
-- `unit_sales` có thể **âm** (trả hàng) → clip về 0. `onpromotion` có NaN → 0.
-- ⭐ **Ngày bán = 0 bị bỏ qua** (implicit zeros): đo được ~**40% ngày** trong khoảng sống của chuỗi không có dòng. Pipeline **zero-fill** mỗi chuỗi về lưới ngày liên tục (bound từ ngày bán đầu→cuối) để lag/rolling tính theo NGÀY, không theo dòng.
+- Benchmark giáo dục giữ toàn bộ SKU thuộc `family=DAIRY` tại `cluster=1`; kết quả không đại diện cho toàn bộ Favorita.
+- `unit_sales` có thể **âm** (trả hàng) → clip về 0 và giữ cờ return cho EDA; không bỏ sản phẩm từng có trả hàng. `onpromotion` có NaN → 0.
+- ⭐ **Ngày bán = 0 bị bỏ qua** (implicit zeros): trên subset DAIRY, **24,1% ngày** trong khoảng sống của chuỗi không có dòng. Pipeline **zero-fill** mỗi chuỗi về lưới ngày liên tục (bound từ ngày bán đầu→cuối) để lag/rolling tính theo NGÀY, không theo dòng.
 - Metric chính thức: **NWRMSLE** (xem A.5).
 
 ### Tải dữ liệu
@@ -222,16 +226,17 @@ data/raw/*.csv
    ▼
 [1] load + join (stores, items)
 [2] lọc nhóm store (store_filter)
-[3] ⭐ ZERO-FILL: reindex mỗi (store,item) về lưới ngày liên tục, +cờ is_imputed
-[4] merge nguồn exog vào cache: oil (nội suy mọi ngày), holidays (cờ national/regional/local), onpromotion
-[5] clip âm→0 (giữ cờ return để EDA), fill onpromotion→0
+[3] lọc family DAIRY (item_filter) trước khi nở dữ liệu
+[4] ⭐ ZERO-FILL: reindex mỗi (store,item) về lưới ngày liên tục, +cờ is_imputed
+[5] merge nguồn exog vào cache: oil (nội suy mọi ngày), holidays (cờ national/regional/local), onpromotion
+[6] clip âm→0 (giữ cờ return để EDA), fill onpromotion→0
    │  loader.prepare_holdout_panel()              ← fixed panel theo forecast origin
    │  features.add_all_features(train_end=...)    ← lag/rolling/group-mean chỉ dùng lịch sử train
    ▼
-[6] feature engineering (xem dưới) → log1p(clip) target
+[7] feature engineering (xem dưới) → log1p(clip) target
    │  preprocessor.preprocess()
    ▼
-[7] series_id + store_idx/item_idx (embedding) → split theo thời gian (không shuffle) → RobustScaler
+[8] series_id + store_idx/item_idx (embedding) → split theo thời gian (không shuffle) → RobustScaler
    ▼
    model input
 ```
@@ -280,7 +285,7 @@ demand_forecasting/
 
 - **Môi trường:** Python 3.11, `uv`; venv tại `/root/.venvs/demand_forecasting`. Reproducible với `seed: 42`.
 - **GPU/CPU:** XGBoost & LSTM ưu tiên CUDA nếu có (cấu hình PyTorch cu118). Không có GPU / GPU yếu → `--set model.device=cpu`.
-- **Tài nguyên:** `train.csv` ~125M dòng. `clean_data.py` load toàn bộ → lọc cluster 1 → zero-fill ra **~12.46M dòng (~4.5 GB RAM, cache feather 291 MB)**; lần build đầu mất **vài phút–vài chục phút** (tùy I/O đĩa). Train sau đó dùng cache → nhanh.
+- **Tài nguyên:** `train.csv` ~125M dòng. `clean_data.py` load toàn bộ → lọc cluster 1 + DAIRY trước zero-fill → cache còn **831.649 dòng** toàn dải ngày, trong đó **774.048 dòng train**; file Feather nén khoảng **5,1 MB**. Train sau đó dùng cache → nhanh.
 - **Chẩn đoán độ thưa:** `python scripts/measure_sparsity.py` (đo tỉ lệ implicit-zero + ước lượng RAM sau reindex).
 - **Chạy test:** `python -m pytest tests/ -q`.
 

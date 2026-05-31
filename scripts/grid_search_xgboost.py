@@ -99,6 +99,7 @@ def grid_search(model_name: str = "xgboost"):
             "rmse": metrics["rmse"],
             "mae": metrics["mae"],
             "mape": metrics["mape"],
+            "rmspe": metrics["rmspe"],
             "elapsed": elapsed,
         })
 
@@ -153,6 +154,7 @@ def grid_search(model_name: str = "xgboost"):
         "rmse": round(r["rmse"], 2),
         "mae": round(r["mae"], 2),
         "mape": round(r["mape"], 6),
+        "rmspe": round(r["rmspe"], 6),
     } for r in all_results]
     with open(results_dir / "all_runs.json", "w") as f:
         json.dump(all_runs_log, f, indent=2)

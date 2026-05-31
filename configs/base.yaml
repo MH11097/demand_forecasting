@@ -46,6 +46,13 @@ store_filter:
   by: cluster
   value: [1]
 
+# Thu hẹp benchmark giáo dục về 1 ngành hàng để train nhẹ và dễ giải thích.
+# Lọc SAU join items.csv nhưng TRƯỚC zero-fill; giữ toàn bộ SKU thuộc family DAIRY.
+# Kết quả model chỉ đại diện cho DAIRY tại cluster 1, không đại diện toàn Favorita.
+item_filter:
+  by: family
+  value: [DAIRY]
+
 # Làm sạch dữ liệu. zero_fill: reindex mỗi chuỗi (store,item) thành lưới ngày LIÊN TỤC
 # từ ngày bán ĐẦU→CUỐI của chuỗi (Favorita bỏ qua ngày bán 0 → ~40% ngày thiếu dòng;
 # nếu không điền, lag/rolling dịch theo dòng ≠ theo ngày → sai). Bound theo first-sale
@@ -97,6 +104,7 @@ loss_fn: "mse"
 
 metrics:
   primary: nwrmsle             # metric chính thức của competition (perishable-weighted RMSLE)
-  secondary: [rmse, mae, mape]
+  # MAPE/RMSPE chỉ tính trên actual khác 0 vì metric phần trăm không xác định tại y=0.
+  secondary: [rmse, mae, mape, rmspe]
 
 results_dir: results

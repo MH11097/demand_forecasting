@@ -154,7 +154,7 @@ def grid_search(
                 logger.info(f"  NWRMSLE={metrics['nwrmsle']:.6f} ({elapsed:.1f}s)")
         except Exception as e:
             logger.warning(f"  FAILED: {e}")
-            results.append({**base, "nwrmsle": float("inf"), "rmse": float("inf"), "mae": float("inf"), "mape": float("inf"), "time_seconds": 0})
+            results.append({**base, "nwrmsle": float("inf"), "rmse": float("inf"), "mae": float("inf"), "mape": float("inf"), "rmspe": float("inf"), "time_seconds": 0})
 
     results_df = pd.DataFrame(results).sort_values("nwrmsle").reset_index(drop=True)
 
