@@ -1,7 +1,4 @@
-"""Prophet model — per-series fitting với Favorita holidays và multiplicative seasonality.
-
-Holiday dataframe được dựng từ cờ locale-aware của cleaner cho từng series.
-"""
+"""Prophet model — per-series fitting with shared regressors and native seasonality."""
 
 import logging
 import time
@@ -10,6 +7,7 @@ import warnings
 import numpy as np
 import pandas as pd
 
+from src.data.forecast_exog import prophet_regressor_cols, require_columns
 from src.models.base import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -28,24 +26,19 @@ class ProphetModel(BaseModel):
         # Dataset có seasonality nhân tính (sales ~ level × seasonal_factor) → multiplicative
         self.seasonality_mode         = model_cfg.get("seasonality_mode", "multiplicative")
         self.seasonality_prior_scale  = model_cfg.get("seasonality_prior_scale", 10.0)
-        self.holidays_prior_scale     = model_cfg.get("holidays_prior_scale", 10.0)
+        self.regressor_cols = prophet_regressor_cols(config.get("features", {}))
         self.models: dict = {}
 
-    def _prepare_prophet_df(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Đổi tên cột sang format Prophet: ds=date, y=unit_sales."""
-        pdf = df[["date", "unit_sales"]].copy()
-        pdf = pdf.rename(columns={"date": "ds", "unit_sales": "y"})
-        return pdf
-
-    def _prepare_holidays(self, df: pd.DataFrame) -> pd.DataFrame | None:
-        """Convert locale-aware Favorita holiday/event flags to Prophet holidays."""
-        parts = []
-        for flag, name in (("is_holiday", "holiday"), ("is_event", "event")):
-            if flag in df.columns:
-                dates = df.loc[df[flag] > 0, ["date"]].drop_duplicates()
-                if len(dates):
-                    parts.append(dates.rename(columns={"date": "ds"}).assign(holiday=name))
-        return pd.concat(parts, ignore_index=True) if parts else None
+    def _prepare_prophet_df(
+        self, df: pd.DataFrame, *, include_target: bool = True
+    ) -> pd.DataFrame:
+        """Build Prophet fit/predict frame with shared forecast-time regressors."""
+        require_columns(df, self.regressor_cols, "Prophet")
+        cols = ["date"]
+        if include_target:
+            cols.append("unit_sales")
+        cols += self.regressor_cols
+        return df[cols].copy().rename(columns={"date": "ds", "unit_sales": "y"})
 
     def train(self, train_df: pd.DataFrame, val_df: pd.DataFrame | None = None) -> dict:
         from prophet import Prophet
@@ -56,7 +49,6 @@ class ProphetModel(BaseModel):
         for sid in series_ids:
             series_data = train_df[train_df["series_id"] == sid].sort_values("date")
             pdf = self._prepare_prophet_df(series_data)
-            holidays = self._prepare_holidays(series_data)
             try:
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore")
@@ -66,12 +58,12 @@ class ProphetModel(BaseModel):
                         changepoint_range=self.changepoint_range,
                         seasonality_mode=self.seasonality_mode,
                         seasonality_prior_scale=self.seasonality_prior_scale,
-                        holidays_prior_scale=self.holidays_prior_scale,
-                        holidays=holidays,
                         yearly_seasonality=True,
                         weekly_seasonality=True,
                         daily_seasonality=False,
                     )
+                    for regressor in self.regressor_cols:
+                        m.add_regressor(regressor)
                     m.fit(pdf)
                     self.models[sid] = m
             except Exception as e:
@@ -93,7 +85,7 @@ class ProphetModel(BaseModel):
             idx = group.index
             if sid in self.models:
                 try:
-                    future = self._prepare_prophet_df(group)
+                    future = self._prepare_prophet_df(group, include_target=False)
                     forecast = self.models[sid].predict(future)
                     predictions[idx] = np.clip(forecast["yhat"].values, 0, None)
                 except Exception:

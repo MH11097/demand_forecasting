@@ -1,8 +1,8 @@
 # ============================================================
 # Prophet — per-series config cho Favorita dataset
 # ============================================================
-# Holiday/event Ecuador được dựng từ holidays_events.csv theo locale và truyền vào
-# Prophet. Pipeline tối giản chưa thêm promo/oil regressors cho Prophet.
+# Prophet dùng native weekly/yearly seasonality. Shared regressors gồm holiday/event
+# theo locale, payday và lịch onpromotion; oil không dùng trong benchmark chính.
 # seasonality_mode=multiplicative: doanh số có biên độ mùa tỉ lệ với mức bán.
 
 model:
@@ -14,6 +14,4 @@ model:
   # Seasonality: nhân tính vì seasonal amplitude tỉ lệ với trend
   seasonality_mode: multiplicative
   seasonality_prior_scale: 10.0
-  # Holiday: lễ/sự kiện Ecuador từ holidays_events.csv
-  holidays_prior_scale: 10.0
   skip_scaling: true   # Prophet tự xử lý scale nội bộ

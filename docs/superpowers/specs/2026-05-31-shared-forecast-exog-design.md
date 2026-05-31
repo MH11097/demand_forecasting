@@ -18,7 +18,7 @@ available at forecast time:
 | Source | Representation | Availability |
 | --- | --- | --- |
 | Calendar seasonality | Weekly and yearly Fourier terms, or model-native equivalent | Derived from date |
-| Holiday and event calendar | `is_holiday`, `is_event`, or Prophet holiday table | Known in advance |
+| Holiday and event calendar | `is_holiday`, `is_event` | Known in advance |
 | Payday cycle | `is_payday` | Derived from date |
 | Promotion schedule | `onpromotion` | Assumed planned in advance |
 | Product perishability | `perishable` | Static item metadata |
@@ -34,7 +34,7 @@ future optional experiment.
 | --- | --- |
 | ARIMA | No external information. Retained as the univariate baseline. |
 | SARIMAX | Receives Fourier terms, holiday/event flags, `is_payday`, and `onpromotion`. |
-| Prophet | Uses native weekly/yearly seasonality, holiday/event table, `is_payday`, and `onpromotion` regressors. |
+| Prophet | Uses native weekly/yearly seasonality plus holiday/event, `is_payday`, and `onpromotion` regressors. |
 | XGBoost | Receives the shared sources plus historical sales-derived features. |
 | LSTM | Receives the shared sources plus historical sales-derived features. |
 
@@ -53,8 +53,8 @@ and ARIMA model history through their native time-series structures.
    exogenous columns.
 2. Update SARIMAX to read its supported columns from that contract instead of
    selecting only Fourier terms.
-3. Update Prophet to add `is_payday` and `onpromotion` as regressors while retaining
-   its holiday/event table and native seasonality.
+3. Update Prophet to use holiday/event, `is_payday`, and `onpromotion` regressors
+   while retaining native seasonality.
 4. Disable oil in the default educational benchmark configuration and documentation.
 5. Keep XGBoost and LSTM behavior compatible with the shared source contract and
    verify that excluded oil columns are not selected by default.
