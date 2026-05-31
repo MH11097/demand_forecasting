@@ -84,8 +84,8 @@ class ProphetModel(BaseModel):
         for sid, group in df.groupby("series_id"):
             idx = group.index
             if sid in self.models:
+                future = self._prepare_prophet_df(group, include_target=False)
                 try:
-                    future = self._prepare_prophet_df(group, include_target=False)
                     forecast = self.models[sid].predict(future)
                     predictions[idx] = np.clip(forecast["yhat"].values, 0, None)
                 except Exception:

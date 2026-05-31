@@ -88,8 +88,8 @@ class SARIMAXModel(BaseModel):
             idx     = group.index
             n_steps = len(group)
             if sid in self.models:
+                exog = self._get_exog(group)
                 try:
-                    exog = self._get_exog(group)
                     # get_forecast() tương thích hơn khi cần truyền exog
                     forecast_result = self.models[sid].get_forecast(steps=n_steps, exog=exog)
                     predictions[idx] = np.clip(forecast_result.predicted_mean, 0, None)

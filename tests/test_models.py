@@ -2,6 +2,7 @@
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from src.data.features import fourier_cols
 from src.models.prophet_model import ProphetModel
@@ -62,6 +63,24 @@ def test_prophet_frame_includes_shared_non_fourier_regressors():
     assert future.columns.tolist() == [
         "ds", "is_holiday", "is_event", "is_payday", "onpromotion",
     ]
+
+
+def test_sarimax_predict_fails_clearly_when_required_exog_is_missing():
+    model = SARIMAXModel({"features": {
+        "use_fourier": False, "use_holiday": False, "use_payday": True, "use_promo": False,
+    }})
+    model.models[0] = object()
+    with pytest.raises(ValueError, match="SARIMAX missing required forecast exog columns: is_payday"):
+        model.predict(pd.DataFrame({"series_id": [0]}))
+
+
+def test_prophet_predict_fails_clearly_when_required_exog_is_missing():
+    model = ProphetModel({"features": {
+        "use_fourier": False, "use_holiday": False, "use_payday": True, "use_promo": False,
+    }})
+    model.models[0] = object()
+    with pytest.raises(ValueError, match="Prophet missing required forecast exog columns: is_payday"):
+        model.predict(pd.DataFrame({"series_id": [0], "date": pd.to_datetime(["2017-01-01"])}))
 
 
 def _global_feature_frame():
