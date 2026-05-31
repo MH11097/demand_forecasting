@@ -45,6 +45,12 @@ def test_disabled_exog_disables_model_feature_group():
     assert config["features"]["use_oil"] is False
 
 
+def test_default_educational_benchmark_disables_oil_features():
+    config = load_config()
+    assert config["exog"]["use_oil"] is True
+    assert config["features"]["use_oil"] is False
+
+
 def test_make_param_slug_arima():
     config = {"model": {"name": "arima", "order": [1, 1, 1]}}
     assert make_param_slug(config) == "order_1-1-1"

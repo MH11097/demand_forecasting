@@ -8,36 +8,12 @@ import torch
 import torch.nn as nn
 from torch.utils.data import Dataset
 
-# Cột liên tục (không phải ID / target / date) — chọn động bằng _select_feature_cols().
-_EXCLUDE_FROM_FEATURES = {
-    "unit_sales", "store_nbr", "item_nbr", "series_id",
-    "id", "cluster", "class",   # ID / categorical thô — không dùng làm feature liên tục
-    "store_idx", "item_idx",    # embedding index — xử lý riêng
-    "date",
-    "was_return", "returned_units",  # EDA-only, dẫn xuất từ target cùng ngày
-}
+from src.data.forecast_exog import global_model_feature_cols
 
 
 def _select_feature_cols(df, config: dict | None = None) -> list[str]:
-    """Chọn cột feature liên tục: tất cả numeric ngoài ID/target/date."""
-    cols = [
-        c for c in df.select_dtypes(include=[np.number]).columns
-        if c not in _EXCLUDE_FROM_FEATURES
-    ]
-    feature_cfg = (config or {}).get("features", {})
-    if not feature_cfg.get("use_promo", True):
-        cols = [
-            c for c in cols
-            if c != "onpromotion" and not c.startswith("promo_")
-            and c not in {"days_since_last_promo", "days_until_next_promo"}
-        ]
-    if not feature_cfg.get("use_oil", True):
-        cols = [c for c in cols if c not in {"dcoilwtico", "oil_lag_7"}]
-    if not feature_cfg.get("use_holiday", True):
-        cols = [c for c in cols if "holiday" not in c and "event" not in c]
-    if not feature_cfg.get("use_perishable", True):
-        cols = [c for c in cols if c != "perishable"]
-    return cols
+    """Use shared forecast exog and leakage-safe sales-history features."""
+    return global_model_feature_cols(df, (config or {}).get("features", {}))
 
 
 def prepare_sequences(

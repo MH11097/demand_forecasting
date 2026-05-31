@@ -48,7 +48,7 @@ features:
   # holiday:    is_holiday/is_event + cờ theo locale (national/regional/local)
   # perishable: perishable (cờ hàng dễ hỏng, đồng thời là trọng số NWRMSLE)
   use_promo: true
-  use_oil: true
+  use_oil: false       # tắt trong benchmark chính; cache vẫn giữ để thử nghiệm phụ
   use_holiday: true
   use_perishable: true
 

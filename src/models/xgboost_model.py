@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 import xgboost as xgb
 
+from src.data.forecast_exog import global_model_feature_cols
 from src.models.base import BaseModel
 
 
@@ -21,17 +22,6 @@ def _xgb_device() -> str:
         return "cuda" if torch.cuda.is_available() else "cpu"
     except Exception:
         return "cpu"
-
-
-# Cột không dùng làm feature: target, composite/row ID, date, embedding index
-_EXCLUDE = {
-    "unit_sales", "series_id", "id", "date", "store_idx", "item_idx",
-    # EDA-only indicators derived from same-day target; unavailable at forecast time.
-    "was_return", "returned_units",
-}
-
-# Cột bắt buộc phải có (store_nbr/item_nbr = categorical signal quan trọng nhất)
-_REQUIRED = ["store_nbr", "item_nbr"]
 
 
 class XGBoostModel(BaseModel):
@@ -54,28 +44,11 @@ class XGBoostModel(BaseModel):
         self.feature_cols: list[str] = []
 
     def _get_features(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Chọn feature động: tất cả numeric ngoài exclude + đảm bảo store_nbr/item_nbr có mặt."""
-        numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-        # loại target/ID/date; giữ store_nbr và item_nbr
-        candidates = [c for c in numeric_cols if c not in _EXCLUDE]
-        feature_cfg = self.config.get("features", {})
-        disabled = set()
-        if not feature_cfg.get("use_promo", True):
-            disabled.update(c for c in candidates if c == "onpromotion" or c.startswith("promo_"))
-            disabled.update({"days_since_last_promo", "days_until_next_promo"})
-        if not feature_cfg.get("use_oil", True):
-            disabled.update({"dcoilwtico", "oil_lag_7"})
-        if not feature_cfg.get("use_holiday", True):
-            disabled.update(c for c in candidates if "holiday" in c or "event" in c)
-        if not feature_cfg.get("use_perishable", True):
-            disabled.add("perishable")
-        candidates = [c for c in candidates if c not in disabled]
-        # đảm bảo store_nbr, item_nbr luôn có (nếu tồn tại trong df)
-        for col in _REQUIRED:
-            if col in df.columns and col not in candidates:
-                candidates.insert(0, col)
-        self.feature_cols = candidates
-        return df[candidates].fillna(0)
+        """Use entity IDs, shared forecast exog, and leakage-safe sales history."""
+        self.feature_cols = global_model_feature_cols(
+            df, self.config.get("features", {}), include_entity_ids=True
+        )
+        return df[self.feature_cols].fillna(0)
 
     def train(self, train_df: pd.DataFrame, val_df: pd.DataFrame | None = None) -> dict:
         start = time.time()
