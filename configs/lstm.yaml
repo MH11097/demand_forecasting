@@ -3,6 +3,7 @@
 # ============================================================
 # Global model với dual embedding (store_emb + item_emb) nối với
 # continuous features trước LSTM. Entity = series_id = factorize(store_nbr,item_nbr).
+# Continuous features = shared external information + sales history chống leakage.
 # Vocab embedding SUY RA TỪ DỮ LIỆU (số store/item trong nhóm đã lọc) — KHÔNG hardcode.
 # seq_len=90, forecast_horizon=90 khớp với horizon dự báo 90 ngày.
 

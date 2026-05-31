@@ -2,8 +2,8 @@
 # XGBoost — global model config cho Favorita dataset
 # ============================================================
 # Global model: train trên TOÀN BỘ chuỗi trong nhóm store đã lọc (store_filter).
-# store_nbr/item_nbr + exog (onpromotion, oil, holiday, perishable) là feature.
-# Feature set chọn động — tất cả numeric ngoài target/ID/date.
+# Feature set: store_nbr/item_nbr + shared external information + sales history.
+# Oil chỉ thêm khi bật features.use_oil cho thí nghiệm phụ.
 
 # Global model -> override sample của base.yaml để dùng TẤT CẢ chuỗi trong nhóm.
 series_sample:

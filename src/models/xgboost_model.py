@@ -1,8 +1,7 @@
-"""XGBoost model — global model với store_nbr/item_nbr + exog làm feature.
+"""XGBoost model — global model with entity IDs, shared exog, and sales history.
 
-Global model: train trên tất cả chuỗi trong nhóm store đã lọc, dùng store_nbr/item_nbr
-+ exog Favorita (onpromotion, oil, holiday, perishable) làm feature. Feature set lấy
-động từ df (tất cả cột numeric ngoài target/ID) + đảm bảo store_nbr/item_nbr được include.
+The educational benchmark excludes oil by default. It remains opt-in for follow-up
+experiments through ``features.use_oil``.
 """
 
 import time
