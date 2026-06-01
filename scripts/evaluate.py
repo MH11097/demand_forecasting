@@ -8,7 +8,7 @@ from pathlib import Path
 import typer
 
 from src.data.features import add_all_features, apply_log_transform
-from src.data.loader import load_raw_data, prepare_holdout_panel, select_series
+from src.data.loader import load_cleaned_data, prepare_holdout_panel, select_series
 from src.data.preprocessor import preprocess
 from src.evaluation.cross_validation import walk_forward_cv
 from src.evaluation.metrics import evaluate_all, weights_from_frame
@@ -42,7 +42,7 @@ def evaluate(
 
     if cv:
         typer.echo(f"Running {cv} walk-forward CV with {n_splits} splits...")
-        df, _ = load_raw_data(config)
+        df, _ = load_cleaned_data(config)
         # chọn mẫu đại diện chuỗi cho per-series models (theo series_sample config)
         df = select_series(df, config)
         if run_dir:
@@ -98,13 +98,16 @@ def evaluate(
     loaded_model = BaseModel.load(str(model_path))
 
     # Load and preprocess data
-    df, _ = load_raw_data(config)
+    df, _ = load_cleaned_data(config)
     # chọn mẫu đại diện chuỗi cho per-series models (theo series_sample config)
     df = select_series(df, config)
     df = prepare_holdout_panel(df, config)
     # train_end → group-mean encodings train-only (chống leakage)
-    df = add_all_features(df, feature_cfg=config.get("features", {}),
-                          train_end=config.get("split", {}).get("train_end"))
+    df = add_all_features(
+        df,
+        feature_cfg=config.get("features", {}),
+        train_end=config.get("split", {}).get("train_end"),
+    )
     if config.get("use_log_sales", False):
         typer.echo("Applying log1p transform to Sales and derived features...")
         df = apply_log_transform(df)
@@ -120,22 +123,28 @@ def evaluate(
     # Prepend context (seq_len + H - 1 rows) để mọi ngày val/test có H-step prediction hợp lệ
     _seq_len_e = config.get("model", {}).get("seq_len", 30)
     _horizon_e = config.get("model", {}).get("forecast_horizon", 1)
-    _ctx_len_e  = _seq_len_e + _horizon_e - 1
+    _ctx_len_e = _seq_len_e + _horizon_e - 1
 
     def _predict_ctx(context_df, target_df):
         if len(context_df) == 0:
             return loaded_model.predict(target_df)
         combined = pd.concat([context_df, target_df]).reset_index(drop=True)
-        return loaded_model.predict(combined)[len(context_df):]
+        return loaded_model.predict(combined)[len(context_df) :]
 
-    train_ctx = train_df.groupby("series_id", group_keys=False).tail(_ctx_len_e) \
-        if "series_id" in train_df.columns else train_df.tail(_ctx_len_e)
-    val_ctx   = val_df.groupby("series_id", group_keys=False).tail(_ctx_len_e) \
-        if "series_id" in val_df.columns else val_df.tail(_ctx_len_e)
+    train_ctx = (
+        train_df.groupby("series_id", group_keys=False).tail(_ctx_len_e)
+        if "series_id" in train_df.columns
+        else train_df.tail(_ctx_len_e)
+    )
+    val_ctx = (
+        val_df.groupby("series_id", group_keys=False).tail(_ctx_len_e)
+        if "series_id" in val_df.columns
+        else val_df.tail(_ctx_len_e)
+    )
 
     eval_sets = [
-        ("validation", val_df,  _predict_ctx(train_ctx, val_df)),
-        ("test",       test_df, _predict_ctx(val_ctx,   test_df)),
+        ("validation", val_df, _predict_ctx(train_ctx, val_df)),
+        ("test", test_df, _predict_ctx(val_ctx, test_df)),
     ]
 
     # đánh giá trên cả val và test -> val để tune, test để báo cáo kết quả cuối cùng
@@ -148,12 +157,14 @@ def evaluate(
 
         # Save plots
         plot_predictions(
-            y_true, preds,
+            y_true,
+            preds,
             title=f"{model} - {split_name}",
             save_path=f"{run_dir}/{split_name}_predictions.png",
         )
         plot_residuals(
-            y_true, preds,
+            y_true,
+            preds,
             title=f"{model} - {split_name}",
             save_path=f"{run_dir}/{split_name}_residuals.png",
         )
