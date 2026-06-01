@@ -44,10 +44,22 @@ features:
   # --- Nhóm 6: Exogenous Favorita (chỉ áp dụng khi exog.* bật trong base.yaml) ---
   # promo:      onpromotion + promo_rolling_rate + promo_count_7/14/30
   #             + days_since_last_promo + days_until_next_promo (onpromotion biết trước)
+  #             + [PHASE 1a] future promo lookahead: promo_count_7/14_future, promo_days_ahead
+  #             + [PHASE 1b] conditional promo stats: sales_with/no_promo_mean/std_7/14/30
   # oil:        dcoilwtico (nội suy) + oil_lag_7
   # holiday:    is_holiday/is_event + cờ theo locale (national/regional/local)
   # perishable: perishable (cờ hàng dễ hỏng, đồng thời là trọng số NWRMSLE)
   use_promo: true
+  use_oil: true
+  use_holiday: true
+  use_perishable: true
+
+  # --- Nhóm 7: [PHASE 2] Multi-level aggregations ---
+  # item_level_agg: item-level totals (cross-store), lags + rolling + conditional promo stats
+  # family_level_agg: family-level totals (cross-store + cross-item), lags + rolling + conditional promo stats
+  # Tránh leakage: fit từ train data, freeze cho val/test.
+  use_item_level_agg: true
+  use_family_level_agg: true
   use_oil: false       # tắt trong benchmark chính; cache vẫn giữ để thử nghiệm phụ
   use_holiday: true
   use_perishable: true

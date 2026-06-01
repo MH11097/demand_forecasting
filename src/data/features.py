@@ -103,11 +103,17 @@ def add_rolling_features(
         grouped = history.groupby(df[GROUP])
         # shift(1) trước rolling -> tránh leakage (không dùng giá trị hôm nay)
         if "mean" in stats:
-            df[f"{TARGET}_rolling_mean_{w}"]   = grouped.transform(lambda x: x.shift(1).rolling(w, min_periods=1).mean())
+            df[f"{TARGET}_rolling_mean_{w}"] = grouped.transform(
+                lambda x: x.shift(1).rolling(w, min_periods=1).mean()
+            )
         if "std" in stats:
-            df[f"{TARGET}_rolling_std_{w}"]    = grouped.transform(lambda x: x.shift(1).rolling(w, min_periods=1).std())
+            df[f"{TARGET}_rolling_std_{w}"] = grouped.transform(
+                lambda x: x.shift(1).rolling(w, min_periods=1).std()
+            )
         if "median" in stats:
-            df[f"{TARGET}_rolling_median_{w}"] = grouped.transform(lambda x: x.shift(1).rolling(w, min_periods=1).median())
+            df[f"{TARGET}_rolling_median_{w}"] = grouped.transform(
+                lambda x: x.shift(1).rolling(w, min_periods=1).median()
+            )
     return df
 
 
@@ -163,7 +169,7 @@ def add_payday_features(df: pd.DataFrame) -> pd.DataFrame:
     """
     df = df.copy()
     day = df["date"].dt.day.to_numpy()
-    ld = df["date"].dt.days_in_month.to_numpy()    # ngày cuối tháng (28-31)
+    ld = df["date"].dt.days_in_month.to_numpy()  # ngày cuối tháng (28-31)
 
     df["is_payday"] = ((day == 15) | (day == ld)).astype(int)
 
@@ -173,15 +179,16 @@ def add_payday_features(df: pd.DataFrame) -> pd.DataFrame:
     cand[cand < 0] = np.inf
     days_to = cand.min(axis=1)
     spill = ~np.isfinite(days_to)
-    days_to[spill] = (ld - day + 15)[spill]        # vượt cuối tháng → tới 15 tháng sau
+    days_to[spill] = (ld - day + 15)[spill]  # vượt cuối tháng → tới 15 tháng sau
     df["days_to_payday"] = days_to.astype(int)
 
     # days_since: từ mốc lương gần nhất đã qua (15 tháng này hoặc cuối tháng TRƯỚC = day)
     since_15 = (day - 15).astype(float)
     cand_s = np.stack([since_15, day.astype(float)], axis=1)
     cand_s[cand_s < 0] = np.inf
-    df["days_since_payday"] = np.where(np.isfinite(cand_s.min(axis=1)),
-                                       cand_s.min(axis=1), day).astype(int)
+    df["days_since_payday"] = np.where(
+        np.isfinite(cand_s.min(axis=1)), cand_s.min(axis=1), day
+    ).astype(int)
     return df
 
 
@@ -194,7 +201,9 @@ def add_promotion_features(df: pd.DataFrame) -> pd.DataFrame:
         return df
     df = df.copy()
     df["promo_rolling_rate"] = (
-        df.groupby(GROUP)["onpromotion"].transform(lambda x: x.shift(1).rolling(14, min_periods=1).mean())
+        df.groupby(GROUP)["onpromotion"].transform(
+            lambda x: x.shift(1).rolling(14, min_periods=1).mean()
+        )
     ).fillna(0)
     return df
 
@@ -220,13 +229,17 @@ def add_promo_timing_features(df: pd.DataFrame) -> pd.DataFrame:
         ).fillna(0)
 
     idx = np.arange(len(df), dtype=float)
-    is_promo = (df["onpromotion"].to_numpy() > 0)
+    is_promo = df["onpromotion"].to_numpy() > 0
     promo_pos = pd.Series(np.where(is_promo, idx, np.nan), index=df.index)
-    last_pos = promo_pos.groupby(df[GROUP]).ffill()      # vị trí KM gần nhất ≤ hôm nay
-    next_pos = promo_pos.groupby(df[GROUP]).bfill()       # vị trí KM gần nhất ≥ hôm nay
+    last_pos = promo_pos.groupby(df[GROUP]).ffill()  # vị trí KM gần nhất ≤ hôm nay
+    next_pos = promo_pos.groupby(df[GROUP]).bfill()  # vị trí KM gần nhất ≥ hôm nay
     BIG = 999
-    df["days_since_last_promo"] = (idx - last_pos).fillna(BIG).clip(upper=BIG).astype(int)
-    df["days_until_next_promo"] = (next_pos - idx).fillna(BIG).clip(upper=BIG).astype(int)
+    df["days_since_last_promo"] = (
+        (idx - last_pos).fillna(BIG).clip(upper=BIG).astype(int)
+    )
+    df["days_until_next_promo"] = (
+        (next_pos - idx).fillna(BIG).clip(upper=BIG).astype(int)
+    )
     return df
 
 
@@ -240,7 +253,9 @@ def add_zero_sales_features(df: pd.DataFrame, train_end=None) -> pd.DataFrame:
     history = _target_history(df, train_end)
     is_zero = (history <= 0).astype(int)
     df["zero_sales_last_28"] = (
-        is_zero.groupby(df[GROUP]).transform(lambda x: x.shift(1).rolling(28, min_periods=1).sum())
+        is_zero.groupby(df[GROUP]).transform(
+            lambda x: x.shift(1).rolling(28, min_periods=1).sum()
+        )
     ).fillna(0)
     return df
 
@@ -259,8 +274,14 @@ def add_holiday_features(df: pd.DataFrame) -> pd.DataFrame:
     """Đảm bảo cờ holiday/event tồn tại; fill 0 nếu thiếu."""
     df = df.copy()
     for c in [
-        "is_holiday", "holiday_national", "holiday_regional", "holiday_local",
-        "is_event", "event_national", "event_regional", "event_local",
+        "is_holiday",
+        "holiday_national",
+        "holiday_regional",
+        "holiday_local",
+        "is_event",
+        "event_national",
+        "event_regional",
+        "event_local",
     ]:
         if c not in df.columns:
             df[c] = 0
@@ -277,7 +298,279 @@ def add_perishable_flag(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def add_all_features(df: pd.DataFrame, feature_cfg: dict | None = None, train_end=None) -> pd.DataFrame:
+def add_future_promo_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Future promo lookahead: đếm KM trong T+1:T+14 (exog biết trước, no leakage).
+
+    LGB's success metrics: future promo từ T+16:T+31 (ước lượng 16 ngày Kaggle test).
+    Favorita: onpromotion là exog (test set có sẵn lịch KM) -> no leakage risk.
+
+    Features:
+    - promo_count_7_future: số ngày KM trong 7 ngày tới
+    - promo_count_14_future: số ngày KM trong 14 ngày tới
+    - promo_days_ahead: khoảng cách (ngày) đến KM kế (nếu có, else BIG)
+
+    YÊU CẦU: df đã zero-fill + sort theo [GROUP, date] -> forward-looking BFill hoạt động.
+    """
+    if "onpromotion" not in df.columns:
+        return df
+    df = df.sort_values([GROUP, "date"]).reset_index(drop=True)
+    g = df.groupby(GROUP)["onpromotion"]
+
+    # Forward roll: đếm KM trong 7 và 14 ngày tới (shift(-1) để bắt đầu từ ngày mai)
+    for w in (7, 14):
+        df[f"promo_count_{w}_future"] = (
+            g.transform(lambda x: x.shift(-1).rolling(w, min_periods=1).sum())
+        ).fillna(0)
+
+    # Khoảng cách tới KM kế: tìm vị trí KM gần nhất trong tương lai
+    idx = np.arange(len(df), dtype=float)
+    is_promo = df["onpromotion"].to_numpy() > 0
+    promo_pos = pd.Series(np.where(is_promo, idx, np.nan), index=df.index)
+    next_pos = promo_pos.groupby(df[GROUP]).bfill()  # vị trí KM gần nhất >= hôm nay
+
+    BIG = 999
+    df["promo_days_ahead"] = (next_pos - idx).fillna(BIG).clip(upper=BIG).astype(int)
+    return df
+
+
+def add_conditional_promo_stats(df: pd.DataFrame, train_end=None) -> pd.DataFrame:
+    """Conditional sales statistics: với KM vs không KM.
+
+    LGB special: tính mean/std/median của unit_sales CHỈ trên ngày có/không KM,
+    separate để model thấy "bán bao nhiêu khi có KM vs không".
+
+    Features (cho mỗi window [7,14,30]):
+    - sales_with_promo_mean_[w]: mean(unit_sales | onpromotion=1) rolling
+    - sales_no_promo_mean_[w]: mean(unit_sales | onpromotion=0) rolling
+    - sales_with_promo_std_[w]: std(unit_sales | onpromotion=1) rolling
+    - sales_no_promo_std_[w]: std(unit_sales | onpromotion=0) rolling
+
+    Chỉ dùng lịch sử biết tại forecast origin (train_end).
+    """
+    if "onpromotion" not in df.columns:
+        return df
+    df = df.copy()
+    history = _target_history(df, train_end)
+
+    for w in (7, 14, 30):
+        grouped = history.groupby(df[GROUP])
+
+        # Với KM: set unit_sales = NaN khi onpromotion=0, rồi rolling trên phần còn lại
+        promo_sales = history.copy()
+        promo_sales[df["onpromotion"] == 0] = np.nan
+        df[f"sales_with_promo_mean_{w}"] = (
+            promo_sales.groupby(df[GROUP]).transform(
+                lambda x: x.shift(1).rolling(w, min_periods=1).mean()
+            )
+        ).fillna(0)
+        df[f"sales_with_promo_std_{w}"] = (
+            promo_sales.groupby(df[GROUP]).transform(
+                lambda x: x.shift(1).rolling(w, min_periods=1).std()
+            )
+        ).fillna(0)
+
+        # Không KM: set unit_sales = NaN khi onpromotion=1, rồi rolling trên phần còn lại
+        no_promo_sales = history.copy()
+        no_promo_sales[df["onpromotion"] == 1] = np.nan
+        df[f"sales_no_promo_mean_{w}"] = (
+            no_promo_sales.groupby(df[GROUP]).transform(
+                lambda x: x.shift(1).rolling(w, min_periods=1).mean()
+            )
+        ).fillna(0)
+        df[f"sales_no_promo_std_{w}"] = (
+            no_promo_sales.groupby(df[GROUP]).transform(
+                lambda x: x.shift(1).rolling(w, min_periods=1).std()
+            )
+        ).fillna(0)
+
+    return df
+
+
+def add_item_level_aggregates(df: pd.DataFrame, train_end=None) -> pd.DataFrame:
+    """Item-level (cross-store) aggregates tương tự LGB's item-level model.
+
+    Tính tổng bán theo item (aggregated across stores), rồi tạo lag/rolling features.
+    Tránh leakage: fit từ train data, freeze cho val/test.
+
+    Features:
+    - item_unit_sales_lag_[lag]: lag của item_total_sales
+    - item_unit_sales_rolling_mean_[w]: rolling mean của item_total_sales
+    - item_sales_with_promo_mean_[w]: rolling mean của item sales khi có KM
+    - item_sales_no_promo_mean_[w]: rolling mean của item sales khi không KM
+    - item_promo_rolling_rate_[w]: rolling promo rate ở item level
+    """
+    if "family" not in df.columns:
+        return df  # Item-level agg cần item metadata
+
+    df = df.copy()
+    df = df.sort_values([GROUP, "date"]).reset_index(drop=True)
+
+    # Fit aggregation từ train data
+    src = df[df["date"] <= pd.Timestamp(train_end)] if train_end is not None else df
+
+    # Tính item-level totals từ train (sum across stores, group by item+date)
+    item_daily = (
+        src.groupby(["item_nbr", "date"])[[TARGET, "onpromotion"]]
+        .agg(
+            {TARGET: "sum", "onpromotion": "max"}
+        )  # max -> cờ 1 nếu có KM ở bất kỳ store nào
+        .reset_index()
+        .rename(columns={TARGET: "item_total_sales"})
+    )
+    item_daily["item_promo_rate"] = item_daily["onpromotion"].astype(int)
+
+    # Merge vào full df (left để giữ test rows)
+    df = df.merge(
+        item_daily[["item_nbr", "date", "item_total_sales", "item_promo_rate"]],
+        on=["item_nbr", "date"],
+        how="left",
+    )
+    df[["item_total_sales", "item_promo_rate"]] = df[
+        ["item_total_sales", "item_promo_rate"]
+    ].fillna(0)
+
+    # Tạo lag/rolling từ item_total_sales (tương tự unit_sales lags)
+    history = df["item_total_sales"].copy()
+    if train_end is not None:
+        history = history.mask(df["date"] > pd.Timestamp(train_end))
+
+    # Lags
+    for lag in [7, 14, 30, 60]:
+        df[f"item_unit_sales_lag_{lag}"] = (
+            history.groupby(df["item_nbr"]).shift(lag).fillna(0)
+        )
+
+    # Rolling means
+    for w in [7, 14, 30]:
+        df[f"item_unit_sales_rolling_mean_{w}"] = (
+            history.groupby(df["item_nbr"]).transform(
+                lambda x: x.shift(1).rolling(w, min_periods=1).mean()
+            )
+        ).fillna(0)
+
+    # Item-level conditional promo stats
+    for w in [7, 14]:
+        item_with_promo = df["item_total_sales"].copy()
+        item_with_promo[df["item_promo_rate"] == 0] = np.nan
+        df[f"item_sales_with_promo_mean_{w}"] = (
+            item_with_promo.groupby(df["item_nbr"]).transform(
+                lambda x: x.shift(1).rolling(w, min_periods=1).mean()
+            )
+        ).fillna(0)
+
+        item_no_promo = df["item_total_sales"].copy()
+        item_no_promo[df["item_promo_rate"] == 1] = np.nan
+        df[f"item_sales_no_promo_mean_{w}"] = (
+            item_no_promo.groupby(df["item_nbr"]).transform(
+                lambda x: x.shift(1).rolling(w, min_periods=1).mean()
+            )
+        ).fillna(0)
+
+    # Item-level promo rolling rate
+    df[f"item_promo_rolling_rate_7"] = (
+        df.groupby("item_nbr")["item_promo_rate"].transform(
+            lambda x: x.shift(1).rolling(7, min_periods=1).mean()
+        )
+    ).fillna(0)
+
+    # Clean up intermediate columns
+    df = df.drop(columns=["item_total_sales", "item_promo_rate"])
+    return df
+
+
+def add_family_level_aggregates(df: pd.DataFrame, train_end=None) -> pd.DataFrame:
+    """Family-level (cross-store, cross-item) aggregates.
+
+    Tính tổng bán theo family (nhóm sản phẩm), rồi tạo lag/rolling features.
+    LGB dùng store-class level aggregates; ở đây dùng family level (simpler).
+
+    Features:
+    - family_unit_sales_lag_[lag]
+    - family_unit_sales_rolling_mean_[w]
+    - family_sales_with_promo_mean_[w]
+    - family_sales_no_promo_mean_[w]
+    - family_promo_rolling_rate_[w]
+    """
+    if "family" not in df.columns:
+        return df
+
+    df = df.copy()
+    df = df.sort_values([GROUP, "date"]).reset_index(drop=True)
+
+    # Fit aggregation từ train data
+    src = df[df["date"] <= pd.Timestamp(train_end)] if train_end is not None else df
+
+    # Tính family-level totals từ train
+    family_daily = (
+        src.groupby(["family", "date"])[[TARGET, "onpromotion"]]
+        .agg({TARGET: "sum", "onpromotion": "max"})
+        .reset_index()
+        .rename(columns={TARGET: "family_total_sales"})
+    )
+    family_daily["family_promo_rate"] = family_daily["onpromotion"].astype(int)
+
+    # Merge vào full df
+    df = df.merge(
+        family_daily[["family", "date", "family_total_sales", "family_promo_rate"]],
+        on=["family", "date"],
+        how="left",
+    )
+    df[["family_total_sales", "family_promo_rate"]] = df[
+        ["family_total_sales", "family_promo_rate"]
+    ].fillna(0)
+
+    # Tạo lag/rolling từ family_total_sales
+    history = df["family_total_sales"].copy()
+    if train_end is not None:
+        history = history.mask(df["date"] > pd.Timestamp(train_end))
+
+    # Lags
+    for lag in [7, 14, 30]:
+        df[f"family_unit_sales_lag_{lag}"] = (
+            history.groupby(df["family"]).shift(lag).fillna(0)
+        )
+
+    # Rolling means
+    for w in [7, 14, 30]:
+        df[f"family_unit_sales_rolling_mean_{w}"] = (
+            history.groupby(df["family"]).transform(
+                lambda x: x.shift(1).rolling(w, min_periods=1).mean()
+            )
+        ).fillna(0)
+
+    # Family-level conditional promo stats
+    for w in [7, 14]:
+        family_with_promo = df["family_total_sales"].copy()
+        family_with_promo[df["family_promo_rate"] == 0] = np.nan
+        df[f"family_sales_with_promo_mean_{w}"] = (
+            family_with_promo.groupby(df["family"]).transform(
+                lambda x: x.shift(1).rolling(w, min_periods=1).mean()
+            )
+        ).fillna(0)
+
+        family_no_promo = df["family_total_sales"].copy()
+        family_no_promo[df["family_promo_rate"] == 1] = np.nan
+        df[f"family_sales_no_promo_mean_{w}"] = (
+            family_no_promo.groupby(df["family"]).transform(
+                lambda x: x.shift(1).rolling(w, min_periods=1).mean()
+            )
+        ).fillna(0)
+
+    # Family-level promo rolling rate
+    df[f"family_promo_rolling_rate_7"] = (
+        df.groupby("family")["family_promo_rate"].transform(
+            lambda x: x.shift(1).rolling(7, min_periods=1).mean()
+        )
+    ).fillna(0)
+
+    # Clean up intermediate columns
+    df = df.drop(columns=["family_total_sales", "family_promo_rate"])
+    return df
+
+
+def add_all_features(
+    df: pd.DataFrame, feature_cfg: dict | None = None, train_end=None
+) -> pd.DataFrame:
     """Áp dụng các bước feature engineering, điều khiển bởi feature_cfg (configs/features.yaml).
 
     Nếu None → bật tất cả với default (nhóm exog chỉ thêm khi cột nguồn có mặt).
@@ -291,7 +584,9 @@ def add_all_features(df: pd.DataFrame, feature_cfg: dict | None = None, train_en
     if cfg.get("use_fourier", True):
         df = add_fourier_features(df)
     if cfg.get("use_lag", True):
-        df = add_lag_features(df, lags=cfg.get("lag_windows") or None, train_end=train_end)
+        df = add_lag_features(
+            df, lags=cfg.get("lag_windows") or None, train_end=train_end
+        )
     if cfg.get("use_rolling", True):
         df = add_rolling_features(
             df,
@@ -310,12 +605,22 @@ def add_all_features(df: pd.DataFrame, feature_cfg: dict | None = None, train_en
     if cfg.get("use_promo", True):
         df = add_promotion_features(df)
         df = add_promo_timing_features(df)
+        df = add_future_promo_features(df)  # Phase 1a: future promo lookahead
+        df = add_conditional_promo_stats(
+            df, train_end=train_end
+        )  # Phase 1b: conditional promo stats
     if cfg.get("use_oil", True):
         df = add_oil_features(df)
     if cfg.get("use_holiday", True):
         df = add_holiday_features(df)
     if cfg.get("use_perishable", True):
         df = add_perishable_flag(df)
+
+    # --- Phase 2: Multi-level aggregations ---
+    if cfg.get("use_item_level_agg", True):
+        df = add_item_level_aggregates(df, train_end=train_end)
+    if cfg.get("use_family_level_agg", True):
+        df = add_family_level_aggregates(df, train_end=train_end)
 
     # lag/rolling tạo NaN ở đầu mỗi chuỗi (chưa đủ quá khứ) -> điền 0 để model không lỗi
     df = df.fillna(0)
