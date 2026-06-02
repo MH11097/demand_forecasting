@@ -19,6 +19,8 @@ dependencies = [
     "typer>=0.9",
     "rich>=13.0",
     "jupyter>=1.0",
+    "kagglehub>=1.0.1",
+    "kaggle>=2.2.0",
 ]
 
 [project.optional-dependencies]

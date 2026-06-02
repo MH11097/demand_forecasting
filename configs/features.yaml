@@ -60,7 +60,6 @@ features:
   # Tránh leakage: fit từ train data, freeze cho val/test.
   use_item_level_agg: true
   use_family_level_agg: true
-  use_oil: false       # tắt trong benchmark chính; cache vẫn giữ để thử nghiệm phụ
   use_holiday: true
   use_perishable: true
 
